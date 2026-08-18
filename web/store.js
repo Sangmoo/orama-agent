@@ -43,6 +43,8 @@ function init() {
     CREATE TABLE IF NOT EXISTS alert_log ( ts INTEGER, kind TEXT, subject TEXT, ok INTEGER, detail TEXT );
     CREATE TABLE IF NOT EXISTS audit_log ( ts INTEGER, usr_id TEXT, action TEXT, target TEXT, detail TEXT );
     CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT );
+    CREATE TABLE IF NOT EXISTS tune_cache ( sql_id TEXT PRIMARY KEY, payload TEXT, ts INTEGER );
+    CREATE TABLE IF NOT EXISTS tune_calls ( ts INTEGER, usr_id TEXT );
   `);
   console.log(`[store] SQLite 준비: ${DB_FILE} (보관 ${RETAIN_DAYS}일)`);
   return true;
@@ -191,11 +193,38 @@ function getMetricsBetween(from, to) {
   }));
 }
 
+// ---- AI 튜닝 캐시 & 호출 카운트 (비용 가드레일) ----
+function getTuneCache(sqlId, maxAgeMs) {
+  if (!db) return null;
+  const r = db.prepare(`SELECT payload, ts FROM tune_cache WHERE sql_id = ?`).get(sqlId);
+  if (!r) return null;
+  if (maxAgeMs && (Date.now() - r.ts) > maxAgeMs) return null;
+  try { return { payload: JSON.parse(r.payload), ts: r.ts }; } catch { return null; }
+}
+function setTuneCache(sqlId, obj) {
+  if (!db) return;
+  db.prepare(`INSERT OR REPLACE INTO tune_cache (sql_id, payload, ts) VALUES (?,?,?)`)
+    .run(sqlId, JSON.stringify(obj), Date.now());
+}
+function addTuneCall(usrId) {
+  if (!db) return;
+  db.prepare(`INSERT INTO tune_calls (ts, usr_id) VALUES (?, ?)`).run(Date.now(), usrId || '-');
+}
+function tuneCallsSince(usrId, sinceTs) {
+  if (!db) return 0;
+  return db.prepare(`SELECT COUNT(*) c FROM tune_calls WHERE usr_id = ? AND ts >= ?`).get(usrId || '-', sinceTs).c;
+}
+function lastTuneCall(usrId) {
+  if (!db) return 0;
+  const r = db.prepare(`SELECT MAX(ts) m FROM tune_calls WHERE usr_id = ?`).get(usrId || '-');
+  return (r && r.m) || 0;
+}
+
 // ---- 정리 ----
 function prune() {
   if (!db) return;
   const cut = Date.now() - RETAIN_DAYS * 86400000;
-  for (const t of ['ash', 'spike_events', 'lock_events', 'alert_log', 'audit_log']) {
+  for (const t of ['ash', 'spike_events', 'lock_events', 'alert_log', 'audit_log', 'tune_calls', 'tune_cache']) {
     try { db.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(cut); } catch (_) {}
   }
   // 기준선 비교(어제 vs 오늘)를 위해 metrics 는 최소 3일 보관
@@ -207,5 +236,6 @@ module.exports = {
   init, ok, insertMetric, getMetrics, getMetricsBetween, insertAsh, ashTopSql, ashTopEvents, ashTopSessions, ashTimeline,
   insertSpike, getSpikes, insertLock, getLocks,
   listRecipients, addRecipient, removeRecipient, logAlert, getAlertLog,
-  addAudit, getAudit, getSetting, setSetting, prune
+  addAudit, getAudit, getSetting, setSetting,
+  getTuneCache, setTuneCache, addTuneCall, tuneCallsSince, lastTuneCall, prune
 };

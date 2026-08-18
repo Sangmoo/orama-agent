@@ -522,16 +522,23 @@ $('#modalBack').onclick = (e) => { if (e.target.id === 'modalBack') $('#modalBac
 
 // ---- AI 튜닝 제안 ----
 let tuneSqlId = null;
-let tuneConfig = { configured: false, model: '', effort: '' };
-getJSON('/api/tune/config').then((r) => { if (r.ok) tuneConfig = r.data; });
+let tuneConfig = { configured: false, model: '', effort: '', limits: {} };
+async function loadTuneConfig() { const r = await getJSON('/api/tune/config'); if (r.ok) tuneConfig = r.data; }
+loadTuneConfig();
 
+function tuneMetaText() {
+  if (!tuneConfig.configured) return 'ANTHROPIC_API_KEY 미설정 (.env)';
+  const L = tuneConfig.limits || {};
+  const used = L.usedToday != null ? ` · 오늘 ${L.usedToday}/${L.dailyLimit}회` : '';
+  return `모델 ${tuneConfig.model} · effort ${tuneConfig.effort}${used}`;
+}
 function resetTune(sqlId) {
   tuneSqlId = sqlId;
-  const meta = tuneConfig.configured ? `모델 ${tuneConfig.model} · effort ${tuneConfig.effort}` : 'ANTHROPIC_API_KEY 미설정 (.env)';
-  $('#tuneMeta').textContent = meta;
+  loadTuneConfig().then(() => { $('#tuneMeta').textContent = tuneMetaText(); });
+  $('#tuneMeta').textContent = tuneMetaText();
   $('#tuneRun').disabled = !tuneConfig.configured;
   $('#tuneBody').innerHTML = tuneConfig.configured
-    ? '<div class="tune-empty">SQL 전문·실행계획·테이블 스키마를 모아 Claude에게 튜닝 제안을 요청합니다. 위 버튼을 눌러주세요.</div>'
+    ? '<div class="tune-empty">SQL 전문·실행계획·테이블 스키마를 모아 Claude에게 튜닝 제안을 요청합니다. 위 버튼을 눌러주세요.<br><span style="font-size:11px">같은 SQL은 캐시되어 재호출 없이 즉시 표시됩니다(비용 절감).</span></div>'
     : '<div class="tune-empty">.env 에 ANTHROPIC_API_KEY 를 설정하면 AI 튜닝 제안을 사용할 수 있습니다.</div>';
 }
 // 아주 가벼운 마크다운 → HTML (코드블록/헤더/볼드/리스트/인라인코드), XSS 방지 위해 먼저 이스케이프
@@ -574,21 +581,30 @@ function renderMarkdown(md) {
   closeLists();
   return html;
 }
-$('#tuneRun').onclick = async () => {
+async function runTune(force) {
   if (!tuneSqlId) return;
   const t0 = Date.now();
   $('#tuneRun').disabled = true;
-  $('#tuneBody').innerHTML = '<div class="tune-loading"><span class="spin">✨</span> Claude 가 스키마·실행계획을 분석 중입니다… (수십초 소요)</div>';
-  const r = await fetch('/api/tune/' + encodeURIComponent(tuneSqlId), { method: 'POST' })
+  $('#tuneBody').innerHTML = force
+    ? '<div class="tune-loading"><span class="spin">✨</span> 캐시 무시하고 새로 분석 중입니다… (수십초 소요)</div>'
+    : '<div class="tune-loading"><span class="spin">✨</span> 분석 중입니다… (캐시 있으면 즉시 표시)</div>';
+  const r = await fetch('/api/tune/' + encodeURIComponent(tuneSqlId) + (force ? '?force=1' : ''), { method: 'POST' })
     .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
   $('#tuneRun').disabled = false;
-  if (!r.ok) { $('#tuneBody').innerHTML = `<div class="tune-empty">제안 실패: ${esc(r.error || '알 수 없음')}</div>`; return; }
-  const secs = ((Date.now() - t0) / 1000).toFixed(0);
+  if (!r.ok) { $('#tuneBody').innerHTML = `<div class="tune-empty">${esc(r.error || '제안 실패')}</div>`; return; }
   const d = r.data;
-  const foot = `<p style="color:var(--muted);font-size:11px;margin-top:16px">분석 테이블: ${d.tables.join(', ') || '없음'} · ${d.model} · ${secs}초${d.usage ? ` · 토큰 in ${d.usage.input}/out ${d.usage.output}` : ''}</p>`;
-  $('#tuneBody').innerHTML = renderMarkdown(d.advice) + foot;
+  const secs = ((Date.now() - t0) / 1000).toFixed(0);
+  const badge = d.cached
+    ? `<div class="tune-cachebar">💾 캐시된 제안 · ${new Date(d.cachedAt).toLocaleString('ko-KR', { hour12: false })} 생성 <button id="tuneRegen" class="mini-btn">🔄 새로 생성</button></div>`
+    : '';
+  const foot = `<p style="color:var(--muted);font-size:11px;margin-top:16px">분석 테이블: ${d.tables.join(', ') || '없음'} · ${d.model}${d.cached ? ' · 캐시' : ` · ${secs}초`}${d.usage ? ` · 토큰 in ${d.usage.input}/out ${d.usage.output}` : ''}</p>`;
+  $('#tuneBody').innerHTML = badge + renderMarkdown(d.advice) + foot;
   bindSqlLinks();
-};
+  const regen = document.getElementById('tuneRegen');
+  if (regen) regen.onclick = () => runTune(true);
+  loadTuneConfig().then(() => { $('#tuneMeta').textContent = tuneMetaText(); });
+}
+$('#tuneRun').onclick = () => runTune(false);
 
 // ---- 진행 작업 (longops) ----
 async function loadLongops() {

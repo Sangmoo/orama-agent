@@ -6,11 +6,26 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('./db');
 const Q = require('./queries');
+const store = require('./store');
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5';
 const EFFORT_ALLOWED = ['low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT = EFFORT_ALLOWED.includes((process.env.ANTHROPIC_EFFORT || '').toLowerCase())
   ? process.env.ANTHROPIC_EFFORT.toLowerCase() : 'medium';
+
+// 비용 가드레일 (.env)
+const CACHE_TTL_MS = parseInt(process.env.TUNE_CACHE_TTL_MIN || '1440', 10) * 60000; // 기본 24h
+const COOLDOWN_MS = parseInt(process.env.TUNE_COOLDOWN_SEC || '15', 10) * 1000;       // 기본 15초
+const DAILY_LIMIT = parseInt(process.env.TUNE_DAILY_LIMIT || '30', 10);               // 사용자별 1일
+function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+function limits(usrId) {
+  return {
+    cacheTtlMin: Math.round(CACHE_TTL_MS / 60000),
+    cooldownSec: Math.round(COOLDOWN_MS / 1000),
+    dailyLimit: DAILY_LIMIT,
+    usedToday: usrId ? store.tuneCallsSince(usrId, startOfToday()) : 0
+  };
+}
 
 let client = null;
 function ready() {
@@ -115,9 +130,26 @@ const SYSTEM_PROMPT = `당신은 Oracle 11g(11.2.0.4) 성능 튜닝 전문 DBA�
 - 간결하되 실행 가능한 구체적 제안 위주로. 일반론 나열 금지.
 - SQL/DDL 은 반드시 마크다운 코드블록(\`\`\`sql)으로 감쌉니다.`;
 
-// 튜닝 제안 생성
-async function suggest(sqlId) {
+// 튜닝 제안 생성 (opts: { usrId, force })
+async function suggest(sqlId, opts = {}) {
+  const usrId = opts.usrId || '-';
+  // 1) 캐시 우선 (force 아니면) — 토큰 비용 0
+  if (!opts.force) {
+    const cached = store.getTuneCache(sqlId, CACHE_TTL_MS);
+    if (cached) return { ...cached.payload, cached: true, cachedAt: cached.ts };
+  }
   if (!ready()) throw new Error('ANTHROPIC_API_KEY 가 설정되지 않았습니다 (.env 확인).');
+  // 2) 쿨다운 (신규 생성만)
+  const since = Date.now() - store.lastTuneCall(usrId);
+  if (since < COOLDOWN_MS) {
+    throw new Error(`잠시 후 다시 시도하세요 (쿨다운 ${Math.ceil((COOLDOWN_MS - since) / 1000)}초 남음).`);
+  }
+  // 3) 일일 한도
+  const used = store.tuneCallsSince(usrId, startOfToday());
+  if (used >= DAILY_LIMIT) {
+    throw new Error(`오늘 AI 튜닝 호출 한도(${DAILY_LIMIT}회)를 초과했습니다. 캐시된 제안은 계속 볼 수 있습니다.`);
+  }
+
   const ctx = await gatherContext(sqlId);
   if (!ctx.sqlText) throw new Error('SQL 텍스트를 찾을 수 없습니다 (커서가 공유풀에서 밀려났을 수 있음).');
   const contextText = buildContextText(ctx);
@@ -131,7 +163,7 @@ async function suggest(sqlId) {
   });
 
   const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-  return {
+  const result = {
     sqlId,
     model: resp.model,
     effort: EFFORT,
@@ -139,6 +171,10 @@ async function suggest(sqlId) {
     tables: ctx.tables.map((t) => `${t.owner}.${t.table}`),
     usage: resp.usage ? { input: resp.usage.input_tokens, output: resp.usage.output_tokens } : null
   };
+  // 캐시 저장 + 호출 카운트(가드레일)
+  store.setTuneCache(sqlId, result);
+  store.addTuneCall(usrId);
+  return { ...result, cached: false };
 }
 
-module.exports = { suggest, isConfigured, MODEL, EFFORT };
+module.exports = { suggest, isConfigured, limits, MODEL, EFFORT };

@@ -129,14 +129,16 @@ app.get('/api/plan/:id', api(async (req) => {
 }));
 
 // --- AI 튜닝 제안 (Claude API) ---
-app.get('/api/tune/config', api(async () => ({
-  configured: advisor.isConfigured(), model: advisor.MODEL, effort: advisor.EFFORT
+app.get('/api/tune/config', api(async (req) => ({
+  configured: advisor.isConfigured(), model: advisor.MODEL, effort: advisor.EFFORT,
+  limits: advisor.limits(req.user && req.user.usrId)
 })));
 app.post('/api/tune/:id', api(async (req) => {
   const sqlId = String(req.params.id || '').trim();
   if (!/^[0-9a-z]+$/i.test(sqlId)) throw new Error('SQL_ID 형식 오류');
-  const result = await advisor.suggest(sqlId);
-  store.addAudit(req.user && req.user.usrId, 'AI_TUNE', sqlId, `${result.model}/${result.effort}`);
+  const usrId = req.user && req.user.usrId;
+  const result = await advisor.suggest(sqlId, { usrId, force: req.query.force === '1' });
+  if (!result.cached) store.addAudit(usrId, 'AI_TUNE', sqlId, `${result.model}/${result.effort}`);
   return result;
 }));
 

@@ -1,6 +1,16 @@
 # ORAMON — Oracle 11g 실시간 모니터링
 
-운영 Oracle 11g(ORCL 11.2.0.4)를 팀이 브라우저로 실시간 모니터링하는 도구.
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-3fb950)
+![Oracle](https://img.shields.io/badge/Oracle-11g%20(11.2)-f85149)
+![AI Tuning](https://img.shields.io/badge/AI%20Tuning-Claude-bc8cff)
+
+운영 Oracle 11g(11.2.0.4)를 팀이 **브라우저로 실시간 모니터링**하는 도구.
+세션·Top SQL·대기이벤트·락/데드락·용량을 한 화면에서 보고, **자체 ASH**·**AI 튜닝 제안**·이메일 알림·세션 KILL까지 — Diagnostic Pack 유료 뷰 없이.
+
+![ORAMON 대시보드 미리보기](docs/preview.svg)
+
+> 🌐 소개 페이지: **https://sangmoo.github.io/orama-agent/**
 
 이 저장소는 두 가지 구성요소를 담고 있습니다.
 
@@ -143,11 +153,18 @@ SQL_ID 모달의 **✨ AI 튜닝** 탭에서 **튜닝 제안 생성**을 누르�
 리포트는 **핵심 진단 → 인덱스 제안(CREATE INDEX) → 쿼리 재작성 → 기타/주의** 순으로 나옵니다.
 Top SQL·세션·블로킹 표의 SQL_ID 모두 이 모달로 열려 한 곳에서 사용합니다.
 
+**비용 가드레일** — 실제 토큰을 쓰므로 안전장치를 내장했습니다:
+- **결과 캐시**: 같은 SQL_ID는 `TUNE_CACHE_TTL_MIN`(기본 24시간) 동안 SQLite 캐시에서 즉시 반환(토큰 0). 최신 분석이 필요하면 **🔄 새로 생성** 버튼.
+- **쿨다운/일일 한도**: 사용자별 신규 호출 `TUNE_COOLDOWN_SEC`(기본 15초) 간격, `TUNE_DAILY_LIMIT`(기본 30회/일). 초과 시 캐시된 제안은 계속 열람 가능.
+
 설정(`.env`):
 ```ini
 ANTHROPIC_API_KEY=sk-ant-...   # 서버에서만 사용, 브라우저로 나가지 않음
 ANTHROPIC_MODEL=claude-opus-5
 ANTHROPIC_EFFORT=medium        # low | medium | high | xhigh | max
+TUNE_CACHE_TTL_MIN=1440        # 캐시 유지(분)
+TUNE_COOLDOWN_SEC=15           # 신규 호출 쿨다운(초)
+TUNE_DAILY_LIMIT=30            # 사용자별 1일 한도
 ```
 > API 키가 없으면 탭에서 "미설정" 안내만 표시되고 다른 기능은 정상 동작합니다. 요청은 로그인 필요하며 감사 로그에 남습니다.
 
@@ -220,7 +237,7 @@ oramon/
 ├── .gitignore             ← .env · node_modules · data · target 제외
 ├── .env                   ← Rust TUI 용 (gitignore, 커밋 안 됨)
 ├── Cargo.toml             ← Rust workspace
-├── docs/index.html        ← GitHub Pages 랜딩 페이지
+├── docs/                  ← GitHub Pages (index.html 랜딩 + preview.svg)
 ├── crates/                ← Rust TUI (oramon-core / -oracle / -collector / -tui)
 └── web/                   ← 웹 대시보드 (실제 완성품)
     ├── server.js          Express + REST API + 인증
