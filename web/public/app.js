@@ -554,20 +554,45 @@ let tuneConfig = { configured: false, model: '', effort: '', limits: {} };
 async function loadTuneConfig() { const r = await getJSON('/api/tune/config'); if (r.ok) tuneConfig = r.data; }
 loadTuneConfig();
 
+function tuneLimitReached() {
+  const L = tuneConfig.limits || {};
+  return tuneConfig.configured && L.dailyLimit != null && L.usedToday != null && L.usedToday >= L.dailyLimit;
+}
 function tuneMetaText() {
   if (!tuneConfig.configured) return 'ANTHROPIC_API_KEY 미설정 (.env)';
   const L = tuneConfig.limits || {};
-  const used = L.usedToday != null ? ` · 오늘 ${L.usedToday}/${L.dailyLimit}회` : '';
+  const used = L.usedToday != null ? ` · 오늘 ${L.usedToday}/${L.dailyLimit}회${tuneLimitReached() ? ' (한도 소진)' : ''}` : '';
   return `모델 ${tuneConfig.model} · effort ${tuneConfig.effort}${used}`;
+}
+// API키·일일한도 상태에 따라 버튼/메타 갱신
+function applyTuneState() {
+  $('#tuneMeta').textContent = tuneMetaText();
+  const btn = $('#tuneRun');
+  const reached = tuneLimitReached();
+  btn.disabled = !tuneConfig.configured || reached;
+  btn.title = reached ? '당일 호출 횟수를 다 사용하였습니다' : '';
+}
+// 아직 결과가 없을 때(placeholder) 안내 문구 렌더 — 미설정/한도소진/일반 3가지
+function renderTunePlaceholder() {
+  applyTuneState();
+  const L = tuneConfig.limits || {};
+  const body = $('#tuneBody');
+  if (!tuneConfig.configured) {
+    body.innerHTML = '<div class="tune-empty">.env 에 ANTHROPIC_API_KEY 를 설정하면 AI 튜닝 제안을 사용할 수 있습니다.</div>';
+  } else if (tuneLimitReached()) {
+    body.innerHTML = `<div class="tune-empty tune-limit">⛔ 당일 호출 횟수를 다 사용하였습니다 (오늘 ${L.usedToday}/${L.dailyLimit}회).<br><span style="font-size:11px">한도는 매일 자정에 초기화되며(.env <code>TUNE_DAILY_LIMIT</code>), 이미 생성된 제안은 서버 캐시에 남아 있습니다.</span></div>`;
+  } else {
+    body.innerHTML = '<div class="tune-empty">SQL 전문·실행계획·테이블 스키마를 모아 Claude에게 튜닝 제안을 요청합니다. 위 버튼을 눌러주세요.<br><span style="font-size:11px">같은 SQL은 캐시되어 재호출 없이 즉시 표시됩니다(비용 절감).</span></div>';
+  }
 }
 function resetTune(sqlId) {
   tuneSqlId = sqlId;
-  loadTuneConfig().then(() => { $('#tuneMeta').textContent = tuneMetaText(); });
-  $('#tuneMeta').textContent = tuneMetaText();
-  $('#tuneRun').disabled = !tuneConfig.configured;
-  $('#tuneBody').innerHTML = tuneConfig.configured
-    ? '<div class="tune-empty">SQL 전문·실행계획·테이블 스키마를 모아 Claude에게 튜닝 제안을 요청합니다. 위 버튼을 눌러주세요.<br><span style="font-size:11px">같은 SQL은 캐시되어 재호출 없이 즉시 표시됩니다(비용 절감).</span></div>'
-    : '<div class="tune-empty">.env 에 ANTHROPIC_API_KEY 를 설정하면 AI 튜닝 제안을 사용할 수 있습니다.</div>';
+  renderTunePlaceholder();
+  // 최신 사용량으로 갱신 — 아직 결과가 안 뜬 placeholder 상태면 다시 그림
+  loadTuneConfig().then(() => {
+    if ($('#tuneBody').querySelector('.tune-empty')) renderTunePlaceholder();
+    else applyTuneState();
+  });
 }
 // 아주 가벼운 마크다운 → HTML (코드블록/헤더/볼드/리스트/인라인코드), XSS 방지 위해 먼저 이스케이프
 function renderMarkdown(md) {
@@ -619,10 +644,16 @@ function renderTuneResult(d, secs) {
   bindSqlLinks();
   const regen = document.getElementById('tuneRegen');
   if (regen) regen.onclick = () => runTune(true);
-  loadTuneConfig().then(() => { $('#tuneMeta').textContent = tuneMetaText(); });
+  // 방금 호출로 한도가 찼을 수 있으니 최신 사용량 반영 (버튼·재생성 잠금)
+  loadTuneConfig().then(() => {
+    applyTuneState();
+    if (regen && tuneLimitReached()) { regen.disabled = true; regen.title = '당일 호출 횟수를 다 사용하였습니다'; }
+  });
 }
 async function runTune(force) {
   if (!tuneSqlId) return;
+  // 한도 소진 시 신규/재생성 호출 차단 (캐시 조회는 서버가 무료로 처리)
+  if (tuneLimitReached()) { renderTunePlaceholder(); return; }
   const t0 = Date.now();
   $('#tuneRun').disabled = true;
   $('#tuneBody').innerHTML = '<div class="tune-loading"><span class="spin">✨</span> 분석 준비 중… (캐시 있으면 즉시)</div>';

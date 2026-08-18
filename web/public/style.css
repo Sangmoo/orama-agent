@@ -314,6 +314,9 @@ tr.lop-running { background: rgba(88,166,255,.06); }
 .tune-cachebar { display: flex; align-items: center; gap: 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
 .tune-cachebar button { margin-left: auto; }
 .tune-empty { color: var(--muted); font-style: italic; text-align: center; padding: 30px 10px; }
+.tune-empty.tune-limit { color: var(--danger, #f85149); font-style: normal; font-weight: 600; }
+.tune-empty.tune-limit span { color: var(--muted); font-weight: 400; }
+.tune-empty.tune-limit code { font-style: normal; font-weight: 600; }
 .tune-loading { color: var(--accent); text-align: center; padding: 30px 10px; }
 .tune-loading .spin { display: inline-block; animation: tspin 1s linear infinite; }
 @keyframes tspin { to { transform: rotate(360deg); } }
