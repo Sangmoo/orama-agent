@@ -177,4 +177,51 @@ async function suggest(sqlId, opts = {}) {
   return { ...result, cached: false };
 }
 
-module.exports = { suggest, isConfigured, limits, MODEL, EFFORT };
+// 스트리밍 버전 — cb: { cached, thinking, delta, done }
+// 캐시/쿨다운/일일한도 로직은 suggest 와 동일하되, 신규 생성은 토큰을 흘려보낸다.
+async function suggestStream(sqlId, opts, cb) {
+  const usrId = (opts && opts.usrId) || '-';
+  if (!(opts && opts.force)) {
+    const cached = store.getTuneCache(sqlId, CACHE_TTL_MS);
+    if (cached) { cb.cached({ ...cached.payload, cached: true, cachedAt: cached.ts }); return; }
+  }
+  if (!ready()) throw new Error('ANTHROPIC_API_KEY 가 설정되지 않았습니다 (.env 확인).');
+  const since = Date.now() - store.lastTuneCall(usrId);
+  if (since < COOLDOWN_MS) throw new Error(`잠시 후 다시 시도하세요 (쿨다운 ${Math.ceil((COOLDOWN_MS - since) / 1000)}초 남음).`);
+  const used = store.tuneCallsSince(usrId, startOfToday());
+  if (used >= DAILY_LIMIT) throw new Error(`오늘 AI 튜닝 호출 한도(${DAILY_LIMIT}회)를 초과했습니다. 캐시된 제안은 계속 볼 수 있습니다.`);
+
+  const ctx = await gatherContext(sqlId);
+  if (!ctx.sqlText) throw new Error('SQL 텍스트를 찾을 수 없습니다 (커서가 공유풀에서 밀려났을 수 있음).');
+  const contextText = buildContextText(ctx);
+
+  const stream = client.messages.stream({
+    model: MODEL,
+    max_tokens: 16000,
+    output_config: { effort: EFFORT },
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: `다음 Oracle SQL을 튜닝해 주세요.\n\n${contextText}` }]
+  });
+
+  let text = '', thinkingSent = false;
+  for await (const ev of stream) {
+    if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'thinking') {
+      if (!thinkingSent) { thinkingSent = true; if (cb.thinking) cb.thinking(); }
+    } else if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+      text += ev.delta.text;
+      if (cb.delta) cb.delta(ev.delta.text);
+    }
+  }
+  const final = await stream.finalMessage();
+  const result = {
+    sqlId, model: final.model, effort: EFFORT,
+    advice: text.trim() || '(응답이 비어 있습니다)',
+    tables: ctx.tables.map((t) => `${t.owner}.${t.table}`),
+    usage: final.usage ? { input: final.usage.input_tokens, output: final.usage.output_tokens } : null
+  };
+  store.setTuneCache(sqlId, result);
+  store.addTuneCall(usrId);
+  cb.done({ ...result, cached: false });
+}
+
+module.exports = { suggest, suggestStream, isConfigured, limits, MODEL, EFFORT };

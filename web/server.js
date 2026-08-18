@@ -133,14 +133,28 @@ app.get('/api/tune/config', api(async (req) => ({
   configured: advisor.isConfigured(), model: advisor.MODEL, effort: advisor.EFFORT,
   limits: advisor.limits(req.user && req.user.usrId)
 })));
-app.post('/api/tune/:id', api(async (req) => {
+// SSE 스트리밍: 생각중(thinking) → 텍스트 델타 → 완료. 캐시 히트면 즉시 1건 전송.
+app.post('/api/tune/:id', async (req, res) => {
   const sqlId = String(req.params.id || '').trim();
-  if (!/^[0-9a-z]+$/i.test(sqlId)) throw new Error('SQL_ID 형식 오류');
+  if (!/^[0-9a-z]+$/i.test(sqlId)) { res.status(400).json({ ok: false, error: 'SQL_ID 형식 오류' }); return; }
   const usrId = req.user && req.user.usrId;
-  const result = await advisor.suggest(sqlId, { usrId, force: req.query.force === '1' });
-  if (!result.cached) store.addAudit(usrId, 'AI_TUNE', sqlId, `${result.model}/${result.effort}`);
-  return result;
-}));
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  const send = (o) => { try { res.write(`data: ${JSON.stringify(o)}\n\n`); } catch (_) {} };
+  try {
+    await advisor.suggestStream(sqlId, { usrId, force: req.query.force === '1' }, {
+      cached: (data) => send({ type: 'cached', data }),
+      thinking: () => send({ type: 'thinking' }),
+      delta: (t) => send({ type: 'delta', text: t }),
+      done: (data) => { store.addAudit(usrId, 'AI_TUNE', sqlId, `${data.model}/${data.effort}`); send({ type: 'done', data }); }
+    });
+  } catch (e) {
+    send({ type: 'error', error: e.message });
+  }
+  res.end();
+});
 
 // --- 진행 중/최근 대형 작업 (longops) ---
 app.get('/api/longops', api(async () => {

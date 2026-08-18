@@ -166,13 +166,15 @@ web/
 | POST | `/api/settings/thresholds` | 감지 임계치 런타임 조정 `{cpuSpike,blockSec,tsPct}` |
 | GET | `/api/baseline` | 기준선 비교 `?metric=cpu&minutes=180` (오늘/어제) |
 | GET | `/api/audit` | 감사 로그(로그인·KILL·설정변경) |
+| GET | `/api/tune/config` | AI 튜닝 설정·모델·일일 한도/사용량 |
+| POST | `/api/tune/:id` | AI 튜닝 제안 — **SSE 스트리밍**(`thinking`/`delta`/`done`/`cached`/`error`). `?force=1` 캐시 무시 재생성 |
 | POST | `/api/login` · `/api/logout` · GET `/api/me` | 로그인/로그아웃/현재 사용자 (인증 불필요) |
 | GET | `/metrics` | Prometheus 포맷 지표(Grafana 연동용, 인증 불필요) |
 | POST | `/api/kill` | 세션 종료 `{sid, serial}` — **dba 모드에서만**, 감사로그 기록 |
 
 > `/api/login`·`/api/logout`·`/api/me`·`/metrics` 를 제외한 모든 `/api/*` 는 로그인 세션이 필요합니다(미인증 시 401).
 
-모든 응답: `{ ok: true, data, ts }` 또는 `{ ok: false, error, ts }`.
+모든 응답: `{ ok: true, data, ts }` 또는 `{ ok: false, error, ts }`. 단 `POST /api/tune/:id` 는 `text/event-stream`(SSE)으로 `data: {type,...}` 이벤트를 흘려보냅니다.
 
 ### 세션 KILL 사용법
 

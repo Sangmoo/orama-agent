@@ -520,6 +520,34 @@ function bindSqlLinks() {
 $('#modalClose').onclick = () => $('#modalBack').classList.remove('show');
 $('#modalBack').onclick = (e) => { if (e.target.id === 'modalBack') $('#modalBack').classList.remove('show'); };
 
+// ---- 복사 (clipboard API + 비보안(http) 폴백) ----
+async function copyText(str, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(str); ok = true; }
+  catch (_) {
+    try { const ta = document.createElement('textarea'); ta.value = str; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch (e) { ok = false; }
+  }
+  if (btn) { const t = btn.textContent; btn.textContent = ok ? '복사됨 ✓' : '실패'; setTimeout(() => { btn.textContent = t; }, 1200); }
+  else toast(ok ? '복사됨' : '복사 실패', ok ? 'ok' : 'err');
+}
+// 코드블록 복사 (이벤트 위임)
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.copy-code');
+  if (!b) return;
+  const code = b.parentElement.querySelector('pre code') || b.parentElement.querySelector('pre');
+  if (code) copyText(code.innerText, b);
+});
+// 모달 헤더: 현재 탭 전체 복사
+let tuneAdviceRaw = '';
+$('#modalCopy').onclick = () => {
+  const active = (document.querySelector('.mtab.active') || {}).dataset ? document.querySelector('.mtab.active').dataset.mtab : 'text';
+  let text = '';
+  if (active === 'text') text = $('#modalBody').textContent;
+  else if (active === 'plan') text = ($('#planTable').innerText + '\n' + $('#planPred').textContent).trim();
+  else if (active === 'tune') text = tuneAdviceRaw || $('#tuneBody').innerText;
+  copyText((text || '').trim(), $('#modalCopy'));
+};
+
 // ---- AI 튜닝 제안 ----
 let tuneSqlId = null;
 let tuneConfig = { configured: false, model: '', effort: '', limits: {} };
@@ -546,7 +574,7 @@ function renderMarkdown(md) {
   const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const codeBlocks = [];
   md = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    codeBlocks.push('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>');
+    codeBlocks.push('<div class="codeblk"><button type="button" class="copy-code" title="코드 복사">복사</button><pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre></div>');
     return ' @@CODE' + (codeBlocks.length - 1) + '@@ ';
   });
   const inline = (t) => esc(t)
@@ -581,28 +609,56 @@ function renderMarkdown(md) {
   closeLists();
   return html;
 }
-async function runTune(force) {
-  if (!tuneSqlId) return;
-  const t0 = Date.now();
-  $('#tuneRun').disabled = true;
-  $('#tuneBody').innerHTML = force
-    ? '<div class="tune-loading"><span class="spin">✨</span> 캐시 무시하고 새로 분석 중입니다… (수십초 소요)</div>'
-    : '<div class="tune-loading"><span class="spin">✨</span> 분석 중입니다… (캐시 있으면 즉시 표시)</div>';
-  const r = await fetch('/api/tune/' + encodeURIComponent(tuneSqlId) + (force ? '?force=1' : ''), { method: 'POST' })
-    .then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
-  $('#tuneRun').disabled = false;
-  if (!r.ok) { $('#tuneBody').innerHTML = `<div class="tune-empty">${esc(r.error || '제안 실패')}</div>`; return; }
-  const d = r.data;
-  const secs = ((Date.now() - t0) / 1000).toFixed(0);
+function renderTuneResult(d, secs) {
+  tuneAdviceRaw = d.advice || '';
   const badge = d.cached
     ? `<div class="tune-cachebar">💾 캐시된 제안 · ${new Date(d.cachedAt).toLocaleString('ko-KR', { hour12: false })} 생성 <button id="tuneRegen" class="mini-btn">🔄 새로 생성</button></div>`
     : '';
-  const foot = `<p style="color:var(--muted);font-size:11px;margin-top:16px">분석 테이블: ${d.tables.join(', ') || '없음'} · ${d.model}${d.cached ? ' · 캐시' : ` · ${secs}초`}${d.usage ? ` · 토큰 in ${d.usage.input}/out ${d.usage.output}` : ''}</p>`;
+  const foot = `<p style="color:var(--muted);font-size:11px;margin-top:16px">분석 테이블: ${d.tables.join(', ') || '없음'} · ${d.model}${d.cached ? ' · 캐시' : (secs != null ? ` · ${secs}초` : '')}${d.usage ? ` · 토큰 in ${d.usage.input}/out ${d.usage.output}` : ''}</p>`;
   $('#tuneBody').innerHTML = badge + renderMarkdown(d.advice) + foot;
   bindSqlLinks();
   const regen = document.getElementById('tuneRegen');
   if (regen) regen.onclick = () => runTune(true);
   loadTuneConfig().then(() => { $('#tuneMeta').textContent = tuneMetaText(); });
+}
+async function runTune(force) {
+  if (!tuneSqlId) return;
+  const t0 = Date.now();
+  $('#tuneRun').disabled = true;
+  $('#tuneBody').innerHTML = '<div class="tune-loading"><span class="spin">✨</span> 분석 준비 중… (캐시 있으면 즉시)</div>';
+  let resp;
+  try { resp = await fetch('/api/tune/' + encodeURIComponent(tuneSqlId) + (force ? '?force=1' : ''), { method: 'POST' }); }
+  catch (e) { $('#tuneBody').innerHTML = `<div class="tune-empty">요청 실패: ${esc(e.message)}</div>`; $('#tuneRun').disabled = false; return; }
+  if (resp.status === 401) { showLogin(); $('#tuneRun').disabled = false; return; }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', acc = '', streaming = false, doneData = null, cachedData = null, errorMsg = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 2);
+      if (!line.startsWith('data:')) continue;
+      let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch (_) { continue; }
+      if (ev.type === 'cached') cachedData = ev.data;
+      else if (ev.type === 'thinking') { $('#tuneBody').innerHTML = '<div class="tune-loading"><span class="spin">🧠</span> 스키마·실행계획 분석 중… (잠시 후 답변이 흐릅니다)</div>'; }
+      else if (ev.type === 'delta') {
+        if (!streaming) { streaming = true; $('#tuneBody').innerHTML = '<pre class="tune-stream"></pre>'; }
+        acc += ev.text;
+        const p = $('#tuneBody .tune-stream');
+        if (p) { p.textContent = acc; p.scrollTop = p.scrollHeight; }
+      } else if (ev.type === 'done') doneData = ev.data;
+      else if (ev.type === 'error') errorMsg = ev.error;
+    }
+  }
+  $('#tuneRun').disabled = false;
+  if (errorMsg) { $('#tuneBody').innerHTML = `<div class="tune-empty">${esc(errorMsg)}</div>`; return; }
+  const d = doneData || cachedData;
+  if (!d) { $('#tuneBody').innerHTML = '<div class="tune-empty">응답이 없습니다.</div>'; return; }
+  renderTuneResult(d, ((Date.now() - t0) / 1000).toFixed(0));
 }
 $('#tuneRun').onclick = () => runTune(false);
 
