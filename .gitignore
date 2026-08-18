@@ -1,0 +1,40 @@
+# ===== 비밀정보 / 환경설정 (절대 커밋 금지) =====
+.env
+**/.env
+.env.local
+**/.env.local
+!.env.example
+!**/.env.example
+
+# ===== Node.js =====
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ===== Rust =====
+/target
+target/
+**/*.rs.bk
+# Cargo.lock 은 애플리케이션이므로 커밋 (재현가능 빌드)
+
+# ===== 런타임 데이터 (SQLite / 로그) =====
+data/
+**/data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+~/.oramon/
+
+# ===== 임시/스크래치 파일 =====
+_*.js
+*.tmp
+*.bak
+
+# ===== OS / 에디터 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

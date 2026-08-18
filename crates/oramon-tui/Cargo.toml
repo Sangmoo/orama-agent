@@ -1,0 +1,22 @@
+[package]
+name = "oramon-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "oramon"
+path = "src/main.rs"
+
+[dependencies]
+oramon-core      = { path = "../oramon-core" }
+oramon-oracle    = { path = "../oramon-oracle" }
+oramon-collector = { path = "../oramon-collector" }
+
+tokio      = { workspace = true }
+anyhow     = { workspace = true }
+tracing    = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono     = { workspace = true }
+ratatui    = { workspace = true }
+crossterm  = { workspace = true }

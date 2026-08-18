@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ORAMON — Oracle 11g 실시간 모니터링 대시보드</title>
+<meta name="description" content="Oracle 11g를 팀이 브라우저로 실시간 모니터링하는 웹 대시보드. 자체 ASH, AI 튜닝 제안, 이메일 알림, 세션 KILL, 데드락 추적까지 — Diagnostic Pack 라이선스 없이." />
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#161b22; --bg3:#1c2330; --border:#2a3240;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --amber:#d29922; --red:#f85149; --purple:#bc8cff;
+    --mono:"Cascadia Code","Consolas",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{background:var(--bg);color:var(--text);font-family:"Segoe UI","Malgun Gothic",system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;}
+  a{color:var(--accent);text-decoration:none;}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px;}
+  .btn{display:inline-block;padding:11px 22px;border-radius:9px;font-weight:600;font-size:15px;transition:.15s;border:1px solid transparent;}
+  .btn-primary{background:var(--accent);color:#04101f;}
+  .btn-primary:hover{filter:brightness(1.1);}
+  .btn-ghost{border-color:var(--border);color:var(--text);background:var(--bg2);}
+  .btn-ghost:hover{border-color:var(--accent);}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.8);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
+  nav .wrap{display:flex;align-items:center;gap:16px;height:58px;}
+  .logo{font-weight:800;letter-spacing:1.5px;font-size:19px;}
+  .logo .dot{color:var(--accent);}
+  nav .links{margin-left:auto;display:flex;gap:22px;align-items:center;}
+  nav .links a{color:var(--muted);font-size:14px;}
+  nav .links a:hover{color:var(--text);}
+  @media(max-width:640px){nav .links a.hide-sm{display:none;}}
+
+  /* hero */
+  .hero{padding:70px 0 50px;text-align:center;position:relative;overflow:hidden;}
+  .hero:before{content:"";position:absolute;top:-140px;left:50%;transform:translateX(-50%);width:760px;height:420px;background:radial-gradient(ellipse,rgba(88,166,255,.16),transparent 70%);pointer-events:none;}
+  .badge{display:inline-block;background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:12px;padding:5px 13px;border-radius:20px;margin-bottom:20px;font-family:var(--mono);}
+  .hero h1{font-size:clamp(34px,6vw,58px);line-height:1.1;font-weight:800;letter-spacing:-1px;margin-bottom:16px;}
+  .hero h1 .g{background:linear-gradient(90deg,var(--accent),var(--purple));-webkit-background-clip:text;background-clip:text;color:transparent;}
+  .hero p.sub{font-size:clamp(16px,2.4vw,20px);color:var(--muted);max-width:660px;margin:0 auto 30px;}
+  .hero .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
+  .hero .note{margin-top:16px;color:var(--muted);font-size:13px;}
+
+  /* mock dashboard */
+  .mock{margin:44px auto 0;max-width:900px;background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5);}
+  .mock .bar{display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg3);}
+  .mock .bar span{width:11px;height:11px;border-radius:50%;background:#39414f;}
+  .mock .bar span:nth-child(1){background:#f85149;}.mock .bar span:nth-child(2){background:#d29922;}.mock .bar span:nth-child(3){background:#3fb950;}
+  .mock .bar .u{margin-left:12px;color:var(--muted);font-size:12px;font-family:var(--mono);}
+  .mock .tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--border);overflow-x:auto;}
+  .mock .tabs div{padding:9px 12px;font-size:12px;color:var(--muted);white-space:nowrap;border-bottom:2px solid transparent;}
+  .mock .tabs div.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
+  .mock .body{padding:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .tile{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:11px 13px;border-left:3px solid var(--accent);}
+  .tile.g{border-left-color:var(--green);}.tile.a{border-left-color:var(--amber);}.tile.p{border-left-color:var(--purple);}
+  .tile .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px;}
+  .tile .v{font-size:22px;font-weight:700;font-family:var(--mono);margin-top:3px;}
+  .mock .chart{grid-column:1/-1;height:96px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:8px;}
+  @media(max-width:640px){.mock .body{grid-template-columns:repeat(2,1fr);}}
+
+  /* sections */
+  section{padding:56px 0;}
+  .sec-h{text-align:center;margin-bottom:8px;}
+  .sec-h h2{font-size:clamp(24px,4vw,34px);font-weight:800;letter-spacing:-.5px;}
+  .sec-h p{color:var(--muted);margin-top:8px;}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px;}
+  @media(max-width:820px){.grid{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:520px){.grid{grid-template-columns:1fr;}}
+  .card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;transition:.15s;}
+  .card:hover{border-color:var(--accent);transform:translateY(-2px);}
+  .card .ico{font-size:26px;margin-bottom:10px;}
+  .card h3{font-size:16px;margin-bottom:6px;}
+  .card p{color:var(--muted);font-size:13.5px;}
+  .card .tag{display:inline-block;margin-top:10px;background:var(--bg3);color:var(--purple);font-size:11px;padding:2px 9px;border-radius:12px;font-family:var(--mono);}
+
+  .alt{background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+  .stack{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:26px;}
+  .chip{background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:7px 16px;font-size:13px;font-family:var(--mono);color:var(--text);}
+
+  /* start */
+  .start pre{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:13.5px;color:var(--green);margin-top:24px;max-width:640px;margin-left:auto;margin-right:auto;line-height:1.8;}
+  .start .cmt{color:var(--muted);}
+  .start .center{text-align:center;margin-top:26px;}
+
+  footer{border-top:1px solid var(--border);padding:30px 0;text-align:center;color:var(--muted);font-size:13px;}
+  footer a{color:var(--muted);}footer a:hover{color:var(--text);}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="logo">◎ ORA<span class="dot">MON</span></div>
+    <div class="links">
+      <a href="#features" class="hide-sm">기능</a>
+      <a href="#stack" class="hide-sm">기술</a>
+      <a href="#start" class="hide-sm">빠른 시작</a>
+      <a href="https://github.com/Sangmoo/orama-agent" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="badge">Oracle 11g · Node.js · 라이선스 프리</div>
+    <h1>운영 Oracle을<br><span class="g">브라우저로 실시간</span> 모니터링</h1>
+    <p class="sub">세션·Top SQL·대기이벤트·락/데드락·용량을 한 화면에서. 자체 ASH와 <b>AI 튜닝 제안</b>, 이메일 알림, 세션 KILL까지 — Diagnostic Pack 유료 뷰 없이.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/Sangmoo/orama-agent" target="_blank" rel="noopener">GitHub에서 보기 →</a>
+      <a class="btn btn-ghost" href="#start">빠른 시작</a>
+    </div>
+    <div class="note">브라우저만 있으면 팀 전체가 접속 · 별도 클라이언트 설치 불필요</div>
+
+    <div class="mock" aria-hidden="true">
+      <div class="bar"><span></span><span></span><span></span><span class="u">◎ ORAMON · 접속됨 · monitor@ORCL</span></div>
+      <div class="tabs">
+        <div>개요</div><div class="on">대시보드</div><div>ASH</div><div>세션</div><div>Top SQL</div><div>락/데드락</div><div>용량</div>
+      </div>
+      <div class="body">
+        <div class="tile g"><div class="k">CPU</div><div class="v">41%</div></div>
+        <div class="tile"><div class="k">활성 세션</div><div class="v">37</div></div>
+        <div class="tile g"><div class="k">차단</div><div class="v">0</div></div>
+        <div class="tile p"><div class="k">AAS</div><div class="v">8.7</div></div>
+        <div class="chart">
+          <svg viewBox="0 0 860 80" preserveAspectRatio="none" width="100%" height="100%">
+            <polyline points="0,60 90,52 180,58 270,40 360,44 450,30 540,36 630,22 720,34 810,26 860,30" fill="none" stroke="#58a6ff" stroke-width="2"/>
+            <polygon points="0,60 90,52 180,58 270,40 360,44 450,30 540,36 630,22 720,34 810,26 860,30 860,80 0,80" fill="#58a6ff" opacity="0.10"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-h">
+      <h2>한 화면에 다 담았습니다</h2>
+      <p>10개 탭 · 실시간 수집기 · 영구 저장까지 하나의 앱으로</p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="ico">📊</div><h3>Grafana 스타일 대시보드</h3><p>CPU·AAS·세션·Exec·Reads·TPS 시계열 라이브 차트와 상태 타일. <b>어제 vs 오늘</b> 기준선 비교까지.</p></div>
+      <div class="card"><div class="ico">🔎</div><h3>자체 ASH</h3><p>수집기가 활성 세션을 직접 샘플링해 구간별 Top SQL·대기이벤트·세션을 재구성.<span class="tag">Diagnostic Pack 불필요</span></p></div>
+      <div class="card"><div class="ico">✨</div><h3>AI 튜닝 제안</h3><p>SQL 전문·실행계획·테이블 스키마/인덱스/통계를 모아 Claude가 <b>진단·인덱스·재작성</b>을 제안.<span class="tag">Claude API</span></p></div>
+      <div class="card"><div class="ico">⛔</div><h3>락 / 데드락 추적</h3><p>실시간 블로킹을 blocker/waiter SQL_ID와 함께 잡아 이력화하고, blocker를 바로 <b>KILL</b>. alert log ORA-00060도.</p></div>
+      <div class="card"><div class="ico">📧</div><h3>이메일 알림</h3><p>CPU 스파이크·블로킹·TS 포화 감지 시 <b>원인 SQL_ID와 전문 포함</b> 메일을 등록 수신자에게 발송.</p></div>
+      <div class="card"><div class="ico">🧭</div><h3>세션 · Top SQL · 진행 작업</h3><p>세션 상세(v$sesstat) 드릴다운, SQL 실행계획, RMAN/인덱스 등 대형 작업 진행률·남은시간.</p></div>
+      <div class="card"><div class="ico">💾</div><h3>영구 저장 · 재시작 복원</h3><p>지표·ASH·이벤트·감사로그를 <b>SQLite(Node 내장)</b>에 저장. 서버 재시작에도 차트·이력 유지.</p></div>
+      <div class="card"><div class="ico">🔐</div><h3>로그인 인증 · 감사 로그</h3><p>DB 계정 기반 로그인(비밀번호는 SQL 내 비교, 앱이 평문을 다루지 않음). KILL·설정변경 누가 했는지 기록.</p></div>
+      <div class="card"><div class="ico">📈</div><h3>용량 · Prometheus</h3><p>테이블스페이스·아카이브 로그·세그먼트 Top 소비. <code>/metrics</code>로 진짜 Grafana 연동도 가능.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="stack" class="alt">
+  <div class="wrap">
+    <div class="sec-h">
+      <h2>가볍고 의존성이 적습니다</h2>
+      <p>Thick 모드 oracledb + Node 내장 SQLite — 네이티브 빌드 부담 최소화</p>
+    </div>
+    <div class="stack">
+      <span class="chip">Node.js 18+</span>
+      <span class="chip">Express</span>
+      <span class="chip">oracledb (Thick)</span>
+      <span class="chip">node:sqlite</span>
+      <span class="chip">nodemailer</span>
+      <span class="chip">@anthropic-ai/sdk</span>
+      <span class="chip">Vanilla JS SPA</span>
+      <span class="chip">Oracle 11g (11.2)</span>
+    </div>
+  </div>
+</section>
+
+<section id="start" class="start">
+  <div class="wrap">
+    <div class="sec-h">
+      <h2>3분 만에 시작</h2>
+      <p>Node와 Oracle Instant Client만 있으면 됩니다</p>
+    </div>
+<pre><span class="cmt"># 1) 저장소 클론</span>
+git clone https://github.com/Sangmoo/orama-agent.git
+cd orama-agent/web
+
+<span class="cmt"># 2) 의존성 설치 · 접속정보 설정</span>
+npm install
+cp .env.example .env    <span class="cmt"># DB 접속정보 입력</span>
+
+<span class="cmt"># 3) 실행 → http://localhost:3900</span>
+npm start</pre>
+    <div class="center">
+      <a class="btn btn-primary" href="https://github.com/Sangmoo/orama-agent" target="_blank" rel="noopener">문서 · 소스 보기</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="logo" style="font-size:16px;margin-bottom:8px;">◎ ORA<span class="dot">MON</span></div>
+    <p>운영 Oracle 11g 실시간 모니터링 · Apache-2.0 License</p>
+    <p style="margin-top:6px;"><a href="https://github.com/Sangmoo/orama-agent" target="_blank" rel="noopener">github.com/Sangmoo/orama-agent</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oramon-core",
+    "crates/oramon-oracle",
+    "crates/oramon-collector",
+    "crates/oramon-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Sangmoo"]
+license = "Apache-2.0"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# 비동기 런타임
+tokio = { version = "1.40", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Oracle 드라이버 (ODPI-C wrapper)
+# 주의: 시스템에 Oracle Instant Client 필요
+# chrono feature: NaiveDateTime 등 chrono 타입을 row.get 으로 받기 위함
+oracle = { version = "0.6", features = ["chrono"] }
+
+# 에러 처리
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 로깅
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 설정
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dotenvy = "0.15"        # .env 파일 로드
+envy = "0.4"             # 환경변수 → struct 역직렬화
+
+# TUI
+ratatui = "0.28"
+crossterm = "0.28"
+
+# 유틸
+chrono = { version = "0.4", features = ["serde"] }
+humantime = "2.1"

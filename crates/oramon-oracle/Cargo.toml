@@ -1,0 +1,16 @@
+[package]
+name = "oramon-oracle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oramon-core = { path = "../oramon-core" }
+
+oracle = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }

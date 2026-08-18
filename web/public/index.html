@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ORAMON · Oracle 모니터</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◎</span>
+      <span class="name">ORAMON</span>
+      <span class="tag" id="profileTag">—</span>
+    </div>
+    <div class="conn" id="connBox">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">접속 확인 중…</span>
+    </div>
+    <div class="userbox" id="userBox" style="display:none">
+      <span class="uname" id="userName"></span>
+      <button id="logoutBtn" title="로그아웃">로그아웃</button>
+    </div>
+    <div class="controls">
+      <label class="refresh">
+        자동 새로고침
+        <select id="intervalSel">
+          <option value="0">끄기</option>
+          <option value="2000">2초</option>
+          <option value="5000" selected>5초</option>
+          <option value="10000">10초</option>
+          <option value="30000">30초</option>
+        </select>
+      </label>
+      <button id="refreshBtn" title="지금 새로고침">⟳</button>
+      <span class="lastupd" id="lastUpd"></span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">개요</button>
+    <button class="tab" data-tab="dashboard">대시보드</button>
+    <button class="tab" data-tab="ash">ASH</button>
+    <button class="tab" data-tab="sessions">세션</button>
+    <button class="tab" data-tab="topsql">Top SQL</button>
+    <button class="tab" data-tab="waits">대기 이벤트</button>
+    <button class="tab" data-tab="longops">진행 작업</button>
+    <button class="tab" data-tab="locks">락/데드락</button>
+    <button class="tab" data-tab="capacity">용량</button>
+    <button class="tab" data-tab="settings">설정</button>
+  </nav>
+
+  <main>
+    <!-- 개요 -->
+    <section class="panel active" id="tab-overview">
+      <div class="grid-inst" id="instBox"></div>
+      <h3 class="section-h">성능 지표</h3>
+      <div class="metric-grid" id="metricGrid"></div>
+    </section>
+
+    <!-- 대시보드 (Grafana 스타일) -->
+    <section class="panel" id="tab-dashboard">
+      <div class="stat-row" id="statRow"></div>
+      <div class="chart-grid" id="chartGrid"></div>
+      <div class="dash-foot" id="dashFoot"></div>
+
+      <div class="sec-head-row">
+        <h3 class="section-h">기준선 비교 (어제 vs 오늘)</h3>
+        <span class="dl-tools">
+          <select id="baseMetric">
+            <option value="cpu">Host CPU %</option>
+            <option value="aas">Average Active Sessions</option>
+            <option value="sessActive">활성 세션</option>
+            <option value="execs">Executions/s</option>
+            <option value="preads">Physical Reads/s</option>
+          </select>
+          <select id="baseWindow">
+            <option value="60">1시간</option>
+            <option value="180" selected>3시간</option>
+            <option value="360">6시간</option>
+            <option value="720">12시간</option>
+          </select>
+        </span>
+      </div>
+      <div class="chart-panel">
+        <div class="cp-head"><span class="cp-title"><span style="color:var(--accent)">━ 오늘</span> &nbsp; <span style="color:var(--muted)">┈ 어제</span></span></div>
+        <div id="baseChart"></div>
+      </div>
+      <div class="notice" id="baseNotice"></div>
+
+      <div class="sec-head-row">
+        <h3 class="section-h">최근 CPU 스파이크 이력</h3>
+        <button class="csv-btn" data-csv="spikes">CSV</button>
+      </div>
+      <div class="notice" id="spikeNotice"></div>
+      <div class="table-wrap">
+        <table id="spikeTable">
+          <thead><tr><th>발생 시각</th><th>CPU%</th><th>AAS</th><th>활성세션</th><th>원인 Top SQL</th><th>상세</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ASH (자체 액티브 세션 히스토리) -->
+    <section class="panel" id="tab-ash">
+      <div class="toolbar">
+        <label class="refresh">구간
+          <select id="ashWindow">
+            <option value="5">최근 5분</option>
+            <option value="15" selected>최근 15분</option>
+            <option value="30">최근 30분</option>
+            <option value="60">최근 60분</option>
+          </select>
+        </label>
+        <span class="ash-note">Diagnostic Pack 라이선스 없이 수집기가 직접 샘플링한 활성 세션 기반</span>
+      </div>
+      <div class="chart-panel" style="margin-bottom:14px">
+        <div class="cp-head"><span class="cp-title">평균 활성 세션(AAS) 추이</span></div>
+        <div id="ashTimeline"></div>
+      </div>
+      <div class="ash-grid">
+        <div>
+          <div class="sec-head-row"><h3 class="section-h">Top SQL (샘플 수)</h3><button class="csv-btn" data-csv="ashsql">CSV</button></div>
+          <div class="table-wrap"><table id="ashSqlTable">
+            <thead><tr><th>SQL_ID</th><th>샘플</th><th>세션수</th><th>비중</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div>
+          <div class="sec-head-row"><h3 class="section-h">Top 대기 이벤트</h3><button class="csv-btn" data-csv="ashevt">CSV</button></div>
+          <div class="table-wrap"><table id="ashEvtTable">
+            <thead><tr><th>이벤트</th><th>Class</th><th>샘플</th><th>비중</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div>
+          <div class="sec-head-row"><h3 class="section-h">Top 세션</h3><button class="csv-btn" data-csv="ashsess">CSV</button></div>
+          <div class="table-wrap"><table id="ashSessTable">
+            <thead><tr><th>SID</th><th>사용자</th><th>머신</th><th>샘플</th><th>SQL수</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 세션 -->
+    <section class="panel" id="tab-sessions">
+      <div class="toolbar">
+        <div class="chips" id="sessChips"></div>
+        <input type="text" id="sessFilter" placeholder="필터: 사용자 / 프로그램 / SQL_ID / 머신…" />
+        <button class="csv-btn" data-csv="sessions">CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="sessTable">
+          <thead>
+            <tr>
+              <th>SID</th><th>Serial</th><th>사용자</th><th>상태</th>
+              <th>대기 이벤트</th><th>Class</th><th>대기(초)</th><th>Blocker</th>
+              <th>SQL_ID</th><th>머신</th><th>프로그램</th><th>Module</th><th>액션</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Top SQL -->
+    <section class="panel" id="tab-topsql">
+      <div class="toolbar">
+        <input type="text" id="sqlFilter" placeholder="필터: SQL_ID / 스키마 / SQL 텍스트…" />
+        <button class="csv-btn" data-csv="topsql">CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="sqlTable">
+          <thead>
+            <tr>
+              <th>SQL_ID</th><th>실행수</th><th>Elapsed(s)</th><th>초/실행</th>
+              <th>CPU(s)</th><th>Buffer Gets</th><th>Disk Reads</th><th>Rows</th>
+              <th>스키마</th><th>SQL 텍스트</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 대기 이벤트 -->
+    <section class="panel" id="tab-waits">
+      <div class="two-col">
+        <div>
+          <h3 class="section-h">시스템 대기 클래스 (누적)</h3>
+          <div class="table-wrap">
+            <table id="waitClassTable">
+              <thead><tr><th>Wait Class</th><th>Total Waits</th><th>Time(s)</th><th>Avg(ms)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h3 class="section-h">현재 활성 세션 대기 (실시간)</h3>
+          <div class="table-wrap">
+            <table id="activeWaitTable">
+              <thead><tr><th>Event</th><th>Class</th><th>세션수</th><th>평균대기(초)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <h3 class="section-h">블로킹 세션</h3>
+          <div class="table-wrap">
+            <table id="blockTable">
+              <thead><tr><th>Waiter SID</th><th>Waiter</th><th>Event</th><th>대기(초)</th><th>Blocker SID</th><th>Blocker</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 진행 작업 (longops) -->
+    <section class="panel" id="tab-longops">
+      <div class="toolbar"><button class="csv-btn" data-csv="longops">CSV</button></div>
+      <div class="table-wrap">
+        <table id="longopsTable">
+          <thead>
+            <tr>
+              <th>SID</th><th>사용자</th><th>작업</th><th>대상</th>
+              <th>진행률</th><th>Sofar / Total</th><th>단위</th>
+              <th>경과(초)</th><th>남은(초)</th><th>SQL_ID</th><th>시작</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="notice">totalwork &gt; 0 인 작업만 표시. 남은시간 &gt; 0 (진행중)이 위로 정렬됩니다.</div>
+    </section>
+
+    <!-- 락/데드락 -->
+    <section class="panel" id="tab-locks">
+      <div class="sec-head-row">
+        <h3 class="section-h">실시간 블로킹 (blocker → waiter)</h3>
+        <button class="csv-btn" data-csv="liveblock">CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="liveBlockTable">
+          <thead><tr>
+            <th>대기(초)</th><th>Waiter SID</th><th>Waiter 사용자</th><th>Waiter SQL</th><th>대기 이벤트</th>
+            <th>잠긴 객체</th><th>Blocker SID</th><th>Blocker 사용자</th><th>Blocker SQL</th><th>Blocker 상태</th><th>액션</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="sec-head-row">
+        <h3 class="section-h">블로킹 감지 이력 <span class="sub" id="lockHistSub"></span></h3>
+        <button class="csv-btn" data-csv="lockhist">CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table id="lockHistTable">
+          <thead><tr>
+            <th>감지 시각</th><th>대기(초)</th><th>Waiter SID</th><th>Waiter SQL</th>
+            <th>Blocker SID</th><th>Blocker 사용자</th><th>Blocker SQL</th><th>잠긴 객체</th><th>액션</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="sec-head-row">
+        <h3 class="section-h">실제 데드락 이력 (alert log · ORA-00060)</h3>
+        <span class="dl-tools">
+          <button id="dlRefresh" class="mini-btn">재수집</button>
+          <button class="csv-btn" data-csv="deadlocks">CSV</button>
+        </span>
+      </div>
+      <div class="notice" id="dlNotice"></div>
+      <div class="table-wrap">
+        <table id="deadlockTable">
+          <thead><tr><th>발생 시각</th><th>트레이스 파일</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 용량 (테이블스페이스 + 아카이브 + 세그먼트) -->
+    <section class="panel" id="tab-capacity">
+      <div class="sec-head-row"><h3 class="section-h">테이블스페이스 사용률</h3><button class="csv-btn" data-csv="tablespaces">CSV</button></div>
+      <div class="table-wrap">
+        <table id="tsTable">
+          <thead><tr><th>테이블스페이스</th><th>사용률</th><th>Total(MB)</th><th>Used(MB)</th><th>Free(MB)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="notice" id="tsNotice"></div>
+
+      <div class="sec-head-row"><h3 class="section-h">아카이브 로그 생성률 (최근 24시간)</h3><button class="csv-btn" data-csv="archivelog">CSV</button></div>
+      <div class="chart-panel" style="margin-bottom:10px">
+        <div class="cp-head"><span class="cp-title">시간별 생성량(MB)</span><span class="cp-now" id="arcTotal"></span></div>
+        <div id="arcChart"></div>
+      </div>
+      <div class="notice" id="arcNotice"></div>
+
+      <div class="sec-head-row"><h3 class="section-h">세그먼트 Top 공간 소비</h3><button class="csv-btn" data-csv="segments">CSV</button></div>
+      <div class="table-wrap">
+        <table id="segTable">
+          <thead><tr><th>소유자</th><th>세그먼트</th><th>유형</th><th>테이블스페이스</th><th>크기(MB)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="notice" id="segNotice"></div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="panel" id="tab-settings">
+      <div class="settings-wrap">
+        <div class="set-card">
+          <h3 class="section-h">이메일 알림</h3>
+          <div class="set-row">
+            <span>알림 발송</span>
+            <label class="switch"><input type="checkbox" id="alertToggle"><span class="slider"></span></label>
+            <span id="alertState" class="mode-ro"></span>
+          </div>
+          <div class="set-row"><span>SMTP 설정</span><span id="smtpState" class="mono"></span></div>
+          <div class="set-row"><button id="alertTest" class="mini-btn">테스트 메일 발송</button></div>
+          <p class="set-help">CPU 스파이크·블로킹·테이블스페이스 포화 발생 시 아래 수신자에게 <b>원인 SQL_ID와 전문</b>을 포함한 메일을 보냅니다. SMTP 접속정보는 <code>.env</code>(SMTP_HOST 등)에서 설정합니다.</p>
+        </div>
+
+        <div class="set-card">
+          <h3 class="section-h">알림 수신자</h3>
+          <div class="set-row">
+            <input type="email" id="recipInput" placeholder="dba@company.com" />
+            <button id="recipAdd" class="mini-btn">추가</button>
+          </div>
+          <ul id="recipList" class="recip-list"></ul>
+        </div>
+
+        <div class="set-card">
+          <h3 class="section-h">감지 임계치</h3>
+          <div class="set-row"><span style="min-width:130px">CPU 스파이크 (%)</span><input type="number" id="thCpu" min="1" max="100" style="width:80px"></div>
+          <div class="set-row"><span style="min-width:130px">블로킹 알림 (초)</span><input type="number" id="thBlock" min="1" style="width:80px"></div>
+          <div class="set-row"><span style="min-width:130px">TS 포화 (%)</span><input type="number" id="thTs" min="1" max="100" style="width:80px"></div>
+          <div class="set-row"><button id="thSave" class="mini-btn">임계치 저장</button></div>
+          <p class="set-help">저장 즉시 수집기에 반영되고 SQLite 에 영구화됩니다(재시작에도 유지).</p>
+        </div>
+
+        <div class="set-card">
+          <div class="sec-head-row"><h3 class="section-h">최근 알림 발송 로그</h3></div>
+          <div class="table-wrap">
+            <table id="alertLogTable">
+              <thead><tr><th>시각</th><th>종류</th><th>제목</th><th>결과</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="set-card" style="grid-column:1/-1">
+          <div class="sec-head-row"><h3 class="section-h">감사 로그 (KILL · 로그인 · 설정변경)</h3><button class="csv-btn" data-csv="audit">CSV</button></div>
+          <div class="table-wrap">
+            <table id="auditTable">
+              <thead><tr><th>시각</th><th>사용자</th><th>액션</th><th>대상</th><th>비고</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 세션 상세 모달 -->
+  <div class="modal-back" id="sessBack">
+    <div class="modal">
+      <div class="modal-head"><span id="sessTitle">세션 상세</span><button id="sessDetailClose">✕</button></div>
+      <div class="mpane active" id="sessDetailBody" style="padding:16px"></div>
+    </div>
+  </div>
+
+  <!-- SQL 상세 모달 -->
+  <div class="modal-back" id="modalBack">
+    <div class="modal">
+      <div class="modal-head">
+        <span id="modalTitle">SQL</span>
+        <button id="modalClose">✕</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="mtab active" data-mtab="text">SQL 전문</button>
+        <button class="mtab" data-mtab="plan">실행계획</button>
+        <button class="mtab" data-mtab="tune">✨ AI 튜닝</button>
+      </div>
+      <pre id="modalBody" class="mpane active"></pre>
+      <div id="modalPlan" class="mpane">
+        <table id="planTable">
+          <thead><tr><th>Id</th><th>Operation</th><th>Object</th><th>Cost</th><th>Rows</th><th>Bytes</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="plan-pred" id="planPred"></div>
+      </div>
+      <div id="modalTune" class="mpane">
+        <div class="tune-bar">
+          <button id="tuneRun" class="mini-btn">튜닝 제안 생성</button>
+          <span id="tuneMeta" class="ash-note"></span>
+        </div>
+        <div id="tuneBody" class="tune-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CPU 스파이크 상세 모달 -->
+  <div class="modal-back" id="spikeBack">
+    <div class="modal">
+      <div class="modal-head">
+        <span id="spikeTitle">CPU 스파이크</span>
+        <button id="spikeClose">✕</button>
+      </div>
+      <div class="mpane active" id="spikeBody" style="padding:16px"></div>
+    </div>
+  </div>
+
+  <!-- 로그인 오버레이 -->
+  <div class="login-back" id="loginBack">
+    <form class="login-box" id="loginForm">
+      <div class="login-logo">◎ ORAMON</div>
+      <div class="login-sub">Oracle 모니터링 · 로그인</div>
+      <input type="text" id="loginId" placeholder="아이디 (USR_ID)" autocomplete="username" autofocus />
+      <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password" />
+      <button type="submit" id="loginBtn">로그인</button>
+      <div class="login-err" id="loginErr"></div>
+    </form>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

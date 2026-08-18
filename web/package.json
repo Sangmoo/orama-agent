@@ -1,0 +1,19 @@
+{
+  "name": "oramon-web",
+  "version": "0.1.0",
+  "description": "Oracle 11g 실시간 모니터링 웹 대시보드 (ORAMON)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "author": "Sangmoo",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "nodemailer": "^9.0.5",
+    "oracledb": "^6.6.0"
+  }
+}
