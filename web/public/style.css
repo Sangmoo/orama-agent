@@ -255,6 +255,12 @@ tr.lop-running { background: rgba(88,166,255,.06); }
 .csv-btn:hover, .mini-btn:hover { background: var(--border); }
 .dl-tools { display: flex; gap: 6px; align-items: center; }
 
+/* 페이지네이션 */
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0 4px; }
+.pager:empty { display: none; }
+.pager .mini-btn:disabled { opacity: .4; cursor: default; }
+.pager .pg-info { font-size: 12px; color: var(--muted); min-width: 150px; text-align: center; }
+
 /* 스파이크 상세 */
 #spikeBody { font-size: 12.5px; line-height: 1.6; }
 #spikeBody h4 { margin: 14px 0 6px; color: var(--accent); font-size: 12px; }

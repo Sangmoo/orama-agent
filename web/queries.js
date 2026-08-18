@@ -293,6 +293,8 @@ const BLOCKING_SIMPLE = `
 //   주의: v$diag_alert_ext 는 alert log(XML) 전체를 파싱하므로 느립니다(수십초).
 //   그래서 ROWNUM 을 WHERE 절에 두어 N건 찾으면 즉시 멈추게 하고(정렬 없음),
 //   최신순 정렬은 수집기(collector)가 JS 에서 처리 + 백그라운드 캐시로 UI 를 막지 않습니다.
+//   30일 보관 필터는 수집기(collector)가 JS 에서 적용합니다 — ROWNUM 조기 종료를 유지해
+//   느린 alert log 전체 스캔을 피하기 위함(SQL 에 날짜 predicate 를 넣으면 조기 종료가 무력화됨).
 const DEADLOCKS = `
   SELECT TO_CHAR(originating_timestamp, 'YYYY-MM-DD HH24:MI:SS') AS t,
          originating_timestamp AS ts,

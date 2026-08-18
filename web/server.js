@@ -71,7 +71,7 @@ app.get('/api/me', (req, res) => {
 app.use('/api', auth.requireAuth);
 
 // --- 감사 로그 ---
-app.get('/api/audit', api(async () => ({ list: store.getAudit(100) })));
+app.get('/api/audit', api(async () => ({ list: store.getAudit(500) })));
 
 // --- 접속/헬스 상태 ---
 app.get('/api/health', api(async () => {
@@ -215,7 +215,7 @@ app.get('/api/events/cpu', api(async (req) => {
 
 // --- 블로킹 이력 (수집기 파일 로그) ---
 app.get('/api/events/locks', api(async (req) => {
-  return { events: collector.getLockEvents(parseInt(req.query.limit || '100', 10)) };
+  return { events: collector.getLockEvents(parseInt(req.query.limit || '500', 10)) };
 }));
 
 // --- 실제 데드락 이력 (alert log ORA-00060, 백그라운드 캐시) ---

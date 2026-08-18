@@ -136,6 +136,34 @@ async function loadBaseline() {
 }
 if ($('#baseMetric')) { $('#baseMetric').addEventListener('change', loadBaseline); $('#baseWindow').addEventListener('change', loadBaseline); }
 
+// ---- 페이지네이션 (10개씩) ----
+//  key 별로 전체 목록/현재 페이지 상태를 보관하고, 페이지 슬라이스만 renderBody 로 그린다.
+//  CSV 는 전체 목록을 별도로 등록하므로 페이지네이션과 무관하게 전체가 내려간다.
+const pagers = {}; // key -> { rows, page, pageSize, pagerSel, renderBody }
+function renderPager(key) {
+  const p = pagers[key]; if (!p) return;
+  const total = p.rows.length;
+  const pages = Math.max(1, Math.ceil(total / p.pageSize));
+  if (p.page > pages) p.page = pages;
+  if (p.page < 1) p.page = 1;
+  const start = (p.page - 1) * p.pageSize;
+  p.renderBody(p.rows.slice(start, start + p.pageSize));
+  const el = $(p.pagerSel); if (!el) return;
+  el.innerHTML = total <= p.pageSize ? '' :
+    `<button class="mini-btn" data-pg="prev" ${p.page <= 1 ? 'disabled' : ''}>‹ 이전</button>
+     <span class="pg-info">${p.page} / ${pages} 페이지 · 총 ${total}건</span>
+     <button class="mini-btn" data-pg="next" ${p.page >= pages ? 'disabled' : ''}>다음 ›</button>`;
+  el.querySelectorAll('button[data-pg]').forEach((b) => b.onclick = () => {
+    p.page += b.dataset.pg === 'next' ? 1 : -1; renderPager(key);
+  });
+}
+function setPager(key, rows, pagerSel, renderBody, pageSize = 10) {
+  const prev = pagers[key];
+  const page = (prev && prev.pagerSel === pagerSel) ? prev.page : 1; // 새로고침 시 현재 페이지 유지
+  pagers[key] = { rows, page, pageSize, pagerSel, renderBody };
+  renderPager(key);
+}
+
 // ---- CSV 내보내기 ----
 const csvReg = {}; // name -> {headers:[], rows:[[...]]}
 function registerCsv(name, headers, rows) { csvReg[name] = { headers, rows }; }
@@ -838,28 +866,38 @@ async function loadLocks() {
   registerCsv('lockhist',
     ['감지시각', 'WAIT_SEC', 'WAITER_SID', 'WAITER_SQL', 'BLOCKER_SID', 'BLOCKER_USER', 'BLOCKER_SQL', 'LOCKED_OBJ'],
     events.map((e) => [e.detected, e.wait_sec, e.waiter && e.waiter.sid, e.waiter && e.waiter.sql_id, e.blocker && e.blocker.sid, e.blocker && e.blocker.user, e.blocker && e.blocker.sql_id, e.locked_obj]));
-  $('#lockHistTable tbody').innerHTML = events.length ? events.map((e) => {
-    const w = e.waiter || {}, b = e.blocker || {};
-    return `<tr>
-      <td class="mono">${esc(new Date(e.ts).toLocaleString('ko-KR', { hour12: false }))}</td>
-      <td class="mono">${num(e.wait_sec)}</td>
-      <td class="mono">${esc(w.sid)}</td>
-      <td>${w.sql_id ? `<span class="sqlid" data-sql="${esc(w.sql_id)}">${esc(w.sql_id)}</span>` : ''}</td>
-      <td class="blocker-cell">${esc(b.sid)}</td>
-      <td>${esc(b.user)}</td>
-      <td>${b.sql_id ? `<span class="sqlid" data-sql="${esc(b.sql_id)}">${esc(b.sql_id)}</span>` : ''}</td>
-      <td class="mono">${esc(e.locked_obj || '')}</td>
-      <td><span class="mode-ro" title="과거 이력이라 KILL 불가(serial 재사용 위험). 실시간 블로킹 표에서 KILL 하세요.">기록</span></td>
-    </tr>`;
-  }).join('') : '<tr><td colspan="9" class="empty">감지된 블로킹 이력 없음</td></tr>';
+  setPager('lockhist', events, '#lockHistPager', (slice) => {
+    $('#lockHistTable tbody').innerHTML = slice.length ? slice.map((e) => {
+      const w = e.waiter || {}, b = e.blocker || {};
+      return `<tr>
+        <td class="mono">${esc(new Date(e.ts).toLocaleString('ko-KR', { hour12: false }))}</td>
+        <td class="mono">${num(e.wait_sec)}</td>
+        <td class="mono">${esc(w.sid)}</td>
+        <td>${w.sql_id ? `<span class="sqlid" data-sql="${esc(w.sql_id)}">${esc(w.sql_id)}</span>` : ''}</td>
+        <td class="blocker-cell">${esc(b.sid)}</td>
+        <td>${esc(b.user)}</td>
+        <td>${b.sql_id ? `<span class="sqlid" data-sql="${esc(b.sql_id)}">${esc(b.sql_id)}</span>` : ''}</td>
+        <td class="mono">${esc(e.locked_obj || '')}</td>
+        <td><span class="mode-ro" title="과거 이력이라 KILL 불가(serial 재사용 위험). 실시간 블로킹 표에서 KILL 하세요.">기록</span></td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="9" class="empty">감지된 블로킹 이력 없음</td></tr>';
+    bindSqlLinks();
+  });
 
   // 3) 실제 데드락 이력 (alert log)
   const dld = (dl.ok && dl.data) || {};
   const dlist = dld.list || [];
   registerCsv('deadlocks', ['발생시각', '트레이스파일'], dlist.map((d) => [d.t, d.trace]));
-  $('#deadlockTable tbody').innerHTML = dlist.length ? dlist.map((d) => `<tr>
-    <td class="mono st-killed">${esc(d.t)}</td><td class="mono sqltext" title="${esc(d.trace)}">${esc(d.trace || '')}</td>
-  </tr>`).join('') : `<tr><td colspan="2" class="empty">${dld.loading ? 'alert log 수집 중… (수십초 소요, 잠시 후 다시 확인)' : '최근 데드락 기록 없음'}</td></tr>`;
+  if (dlist.length) {
+    setPager('deadlocks', dlist, '#deadlockPager', (slice) => {
+      $('#deadlockTable tbody').innerHTML = slice.map((d) => `<tr>
+        <td class="mono st-killed">${esc(d.t)}</td><td class="mono sqltext" title="${esc(d.trace)}">${esc(d.trace || '')}</td>
+      </tr>`).join('');
+    });
+  } else {
+    delete pagers.deadlocks; $('#deadlockPager').innerHTML = '';
+    $('#deadlockTable tbody').innerHTML = `<tr><td colspan="2" class="empty">${dld.loading ? 'alert log 수집 중… (수십초 소요, 잠시 후 다시 확인)' : '최근 30일 데드락 기록 없음'}</td></tr>`;
+  }
   let note = '';
   if (dld.error) note = '⚠ ' + dld.error;
   else if (dld.loading && !dlist.length) note = 'alert log(v$diag_alert_ext) 스캔은 느려서 백그라운드로 수집합니다. 잠시 후 자동 표시됩니다.';
@@ -953,11 +991,13 @@ async function loadSettings() {
   const aud = await getJSON('/api/audit');
   const list = (aud.ok && aud.data.list) || [];
   registerCsv('audit', ['시각', '사용자', '액션', '대상', '비고'], list.map((a) => [new Date(a.ts).toLocaleString('ko-KR', { hour12: false }), a.usr_id, a.action, a.target, a.detail]));
-  $('#auditTable tbody').innerHTML = list.length ? list.map((a) => `<tr>
-    <td class="mono">${esc(new Date(a.ts).toLocaleString('ko-KR', { hour12: false }))}</td>
-    <td>${esc(a.usr_id)}</td>
-    <td class="${a.action === 'KILL' ? 'st-killed' : ''}">${esc(a.action)}</td>
-    <td class="mono">${esc(a.target || '')}</td><td class="mono">${esc(a.detail || '')}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">기록 없음</td></tr>';
+  setPager('audit', list, '#auditPager', (slice) => {
+    $('#auditTable tbody').innerHTML = slice.length ? slice.map((a) => `<tr>
+      <td class="mono">${esc(new Date(a.ts).toLocaleString('ko-KR', { hour12: false }))}</td>
+      <td>${esc(a.usr_id)}</td>
+      <td class="${a.action === 'KILL' ? 'st-killed' : ''}">${esc(a.action)}</td>
+      <td class="mono">${esc(a.target || '')}</td><td class="mono">${esc(a.detail || '')}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">기록 없음</td></tr>';
+  });
 }
 $('#thSave').onclick = async () => {
   const body = { cpuSpike: parseFloat($('#thCpu').value), blockSec: parseInt($('#thBlock').value, 10), tsPct: parseFloat($('#thTs').value) };

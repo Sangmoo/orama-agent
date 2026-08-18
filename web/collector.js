@@ -18,6 +18,7 @@ const LOCK_LOG = path.join(DATA_DIR, 'locks.log');
 // 설정 (.env) — SAMPLE_MS/MAX_POINTS 는 고정, 임계치는 런타임 조정 가능
 const SAMPLE_MS = parseInt(process.env.COLLECT_INTERVAL_MS || '10000', 10);
 const MAX_POINTS = parseInt(process.env.HISTORY_POINTS || '1080', 10);   // 10s*1080 = 3시간
+const LOG_RETAIN_DAYS = parseInt(process.env.LOG_RETAIN_DAYS || '30', 10); // 이력(감사·블로킹·스파이크·데드락) 보관 일수
 const th = {                                                            // 런타임 조정 가능한 임계치
   cpuSpike: parseFloat(process.env.CPU_SPIKE_PCT || '85'),               // CPU 스파이크(%)
   blockSec: parseInt(process.env.BLOCK_ALERT_SEC || '30', 10),           // 블로킹 이력(초)
@@ -46,6 +47,18 @@ function ensureDir() {
 function appendLog(file, obj) {
   try { fs.appendFileSync(file, JSON.stringify(obj) + '\n'); } catch (e) { console.error('[collector] 로그 기록 실패:', e.message); }
 }
+// JSONL 로그 파일에서 LOG_RETAIN_DAYS 보다 오래된 줄 제거 (SQLite prune 과 짝)
+function pruneLogFile(file, days) {
+  try {
+    if (!fs.existsSync(file)) return;
+    const cut = Date.now() - days * 86400000;
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    const kept = lines.filter((l) => { try { return (JSON.parse(l).ts || 0) >= cut; } catch { return false; } });
+    if (kept.length !== lines.length) fs.writeFileSync(file, kept.length ? kept.join('\n') + '\n' : '');
+  } catch (e) { console.warn('[collector] 로그 파일 정리 실패:', file, e.message); }
+}
+function pruneLogFiles() { pruneLogFile(SPIKE_LOG, LOG_RETAIN_DAYS); pruneLogFile(LOCK_LOG, LOG_RETAIN_DAYS); }
+
 // 파일 마지막 N줄 파싱
 function tailJson(file, limit) {
   try {
@@ -200,12 +213,16 @@ async function fetchDeadlocks() {
   deadlockCache.loading = true;
   try {
     const rows = await db.query(Q.DEADLOCKS, {}, { callTimeout: 90000 }); // 느림(수십초) — 90초 넘으면 취소
-    // 최신순 정렬 후 상위 100
-    rows.sort((a, b) => (b.TS instanceof Date ? b.TS.getTime() : 0) - (a.TS instanceof Date ? a.TS.getTime() : 0));
-    deadlockCache.list = rows.slice(0, 100).map((r) => {
-      const m = /More info in file (\S+)/.exec(r.MESSAGE_TEXT || '');
-      return { t: r.T, trace: m ? m[1] : null };
-    });
+    // 30일 보관 필터(JS) → 최신순 정렬 → 상위 100
+    const cut = Date.now() - LOG_RETAIN_DAYS * 86400000;
+    deadlockCache.list = rows
+      .filter((r) => r.TS instanceof Date && r.TS.getTime() >= cut)
+      .sort((a, b) => b.TS.getTime() - a.TS.getTime())
+      .slice(0, 100)
+      .map((r) => {
+        const m = /More info in file (\S+)/.exec(r.MESSAGE_TEXT || '');
+        return { t: r.T, trace: m ? m[1] : null };
+      });
     deadlockCache.fetchedAt = Date.now();
     deadlockCache.error = null;
     console.log(`[collector] 데드락 이력 수집 완료: ${deadlockCache.list.length}건 (최신 ${deadlockCache.list[0] ? deadlockCache.list[0].t : '-'})`);
@@ -232,7 +249,8 @@ function start() {
   // 테이블스페이스 포화 체크(5분) + 오래된 데이터 정리(1시간)
   tsTimer = setInterval(checkTablespaces, 5 * 60 * 1000);
   setTimeout(checkTablespaces, 20000);
-  pruneTimer = setInterval(() => store.prune(), 60 * 60 * 1000);
+  pruneTimer = setInterval(() => { store.prune(); pruneLogFiles(); }, 60 * 60 * 1000);
+  setTimeout(() => { store.prune(); pruneLogFiles(); }, 30000); // 기동 30초 뒤 1회 즉시 정리
   console.log(`[collector] 시작: ${SAMPLE_MS}ms 주기, CPU 스파이크 ${th.cpuSpike}%, 블로킹 ${th.blockSec}s, TS 알림 ${th.tsPct}%`);
 }
 function stop() {

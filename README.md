@@ -38,7 +38,7 @@ Node.js + Express + `oracledb`(Thick 모드) + 단일 페이지 대시보드. Or
 | **Top SQL** | `v$sqlarea` 누적 Elapsed Top 30 + 실행계획(`v$sql_plan`) + **AI 튜닝 제안** |
 | **대기 이벤트** | 시스템 대기 클래스 + 실시간 활성 세션 대기 + 블로킹 트리 |
 | **진행 작업** | `v$session_longops` 대형작업(RMAN/인덱스/정렬) 진행률·남은시간 |
-| **락/데드락** | 실시간 블로킹(Blocker KILL) + 블로킹 감지 이력(SQL_ID) + 실제 데드락 이력(alert log ORA-00060) |
+| **락/데드락** | 실시간 블로킹(Blocker KILL) + 블로킹 감지 이력(SQL_ID) + 실제 데드락 이력(alert log ORA-00060). 이력 표는 **10건씩 페이지네이션** |
 | **용량** | 테이블스페이스 사용률 + 아카이브 로그 생성률(24h) + 세그먼트 Top 공간소비 |
 | **설정** | 이메일 알림 on/off·수신자 관리·테스트발송 + 감지 임계치 조정 + 감사 로그 |
 
@@ -103,7 +103,8 @@ HISTORY_POINTS=1080
 CPU_SPIKE_PCT=85
 BLOCK_ALERT_SEC=30
 TS_ALERT_PCT=90
-RETAIN_DAYS=7
+RETAIN_DAYS=7                # ASH·알림로그·튜닝캐시 등 고빈도 데이터 보관(일)
+LOG_RETAIN_DAYS=30          # 감사 로그·블로킹 감지 이력·CPU 스파이크·데드락 이력 보관(일)
 
 # 로그인 인증
 AUTH_ENABLED=true            # false 면 인증 없이 열림(사내 폐쇄망 등)
@@ -144,6 +145,8 @@ SMTP_FROM=oramon@yourcompany.com
 - **DB 재접속 복원력**: 웹서버가 먼저 뜨고 Oracle 은 재시도 루프로 접속. 리스너 지연·순단에도 스스로 회복(`poolPingInterval`).
 - **HTTPS 권장**: 로그인·KILL·SMTP 비번이 평문으로 오가지 않도록 리버스 프록시(TLS) 앞단 배치 권장.
 - **영구 데이터**: `web/data/oramon.db`(SQLite, 지표·ASH·이벤트·수신자·감사로그). `.gitignore` 처리됨.
+- **데이터 보관/자동 삭제**: 수집기가 매시간 오래된 데이터를 정리합니다. **감사 로그·블로킹 감지 이력·CPU 스파이크·데드락 이력은 `LOG_RETAIN_DAYS`(기본 30일)** 보관 후 삭제되고, ASH·튜닝 캐시 등은 `RETAIN_DAYS`(기본 7일)로 관리됩니다. 데드락은 alert log에서 최근 `LOG_RETAIN_DAYS`일만 표시합니다.
+- **이력 페이지네이션**: 감사 로그·블로킹 감지 이력·데드락 이력은 **10건씩 페이지**로 나눠 보며(이전/다음), CSV 내보내기는 전체 건을 대상으로 합니다.
 
 ## 1.9 AI 튜닝 제안 (Claude API)
 

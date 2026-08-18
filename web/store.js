@@ -13,6 +13,8 @@ try { ({ DatabaseSync } = require('node:sqlite')); } catch (e) {
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'oramon.db');
 const RETAIN_DAYS = parseInt(process.env.RETAIN_DAYS || '7', 10);
+// 감사 로그 · 블로킹 감지 이력 · CPU 스파이크 이력은 더 오래 보관 (기본 30일)
+const LOG_RETAIN_DAYS = parseInt(process.env.LOG_RETAIN_DAYS || '30', 10);
 
 let db = null;
 
@@ -46,7 +48,7 @@ function init() {
     CREATE TABLE IF NOT EXISTS tune_cache ( sql_id TEXT PRIMARY KEY, payload TEXT, ts INTEGER );
     CREATE TABLE IF NOT EXISTS tune_calls ( ts INTEGER, usr_id TEXT );
   `);
-  console.log(`[store] SQLite 준비: ${DB_FILE} (보관 ${RETAIN_DAYS}일)`);
+  console.log(`[store] SQLite 준비: ${DB_FILE} (기본 보관 ${RETAIN_DAYS}일 · 이력 ${LOG_RETAIN_DAYS}일)`);
   return true;
 }
 
@@ -223,9 +225,15 @@ function lastTuneCall(usrId) {
 // ---- 정리 ----
 function prune() {
   if (!db) return;
+  // 고빈도/캐시성 데이터는 RETAIN_DAYS(기본 7일)
   const cut = Date.now() - RETAIN_DAYS * 86400000;
-  for (const t of ['ash', 'spike_events', 'lock_events', 'alert_log', 'audit_log', 'tune_calls', 'tune_cache']) {
+  for (const t of ['ash', 'alert_log', 'tune_calls', 'tune_cache']) {
     try { db.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(cut); } catch (_) {}
+  }
+  // 감사 로그 · 블로킹 감지 이력 · CPU 스파이크 이력은 LOG_RETAIN_DAYS(기본 30일) 보관 후 삭제
+  const logCut = Date.now() - LOG_RETAIN_DAYS * 86400000;
+  for (const t of ['audit_log', 'lock_events', 'spike_events']) {
+    try { db.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(logCut); } catch (_) {}
   }
   // 기준선 비교(어제 vs 오늘)를 위해 metrics 는 최소 3일 보관
   const metricCut = Date.now() - Math.max(RETAIN_DAYS, 3) * 86400000;
