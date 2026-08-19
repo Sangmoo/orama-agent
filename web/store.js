@@ -50,6 +50,7 @@ function init() {
     CREATE TABLE IF NOT EXISTS deadlocks ( ts INTEGER PRIMARY KEY, t TEXT, trace TEXT );
     CREATE TABLE IF NOT EXISTS ts_usage ( ts INTEGER, tablespace TEXT, used_mb REAL, total_mb REAL );
     CREATE INDEX IF NOT EXISTS idx_tsusage ON ts_usage(tablespace, ts);
+    CREATE TABLE IF NOT EXISTS notes ( scope TEXT, ref TEXT, note TEXT, usr_id TEXT, ts INTEGER, PRIMARY KEY (scope, ref) );
   `);
   console.log(`[store] SQLite 준비: ${DB_FILE} (기본 보관 ${RETAIN_DAYS}일 · 이력 ${LOG_RETAIN_DAYS}일)`);
   return true;
@@ -271,6 +272,27 @@ function getTsSamples(tablespace, sinceTs) {
     .all(tablespace, sinceTs);
 }
 
+// ---- 메모(주석) — scope('sql' 등) + ref(SQL_ID 등) 별 팀 메모 ----
+function getNote(scope, ref) {
+  if (!db) return null;
+  return db.prepare(`SELECT scope, ref, note, usr_id, ts FROM notes WHERE scope = ? AND ref = ?`).get(scope, ref) || null;
+}
+function listNotes(scope) {
+  if (!db) return [];
+  return db.prepare(`SELECT ref, note, usr_id, ts FROM notes WHERE scope = ? ORDER BY ts DESC`).all(scope);
+}
+function setNote(scope, ref, note, usrId) {
+  if (!db) return;
+  const txt = String(note || '').trim();
+  if (!txt) { db.prepare(`DELETE FROM notes WHERE scope = ? AND ref = ?`).run(scope, ref); return; }
+  db.prepare(`INSERT OR REPLACE INTO notes (scope, ref, note, usr_id, ts) VALUES (?,?,?,?,?)`)
+    .run(scope, ref, txt.slice(0, 2000), usrId || '-', Date.now());
+}
+function deleteNote(scope, ref) {
+  if (!db) return;
+  db.prepare(`DELETE FROM notes WHERE scope = ? AND ref = ?`).run(scope, ref);
+}
+
 // ---- 정리 ----
 function prune() {
   if (!db) return;
@@ -295,5 +317,6 @@ module.exports = {
   listRecipients, addRecipient, removeRecipient, logAlert, getAlertLog,
   addAudit, getAudit, getSetting, setSetting,
   getTuneCache, setTuneCache, addTuneCall, tuneCallsSince, lastTuneCall,
-  insertDeadlocks, getDeadlocks, ashHeatmap, insertTsUsage, getTsSamples, prune
+  insertDeadlocks, getDeadlocks, ashHeatmap, insertTsUsage, getTsSamples,
+  getNote, listNotes, setNote, deleteNote, prune
 };

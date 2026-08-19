@@ -160,6 +160,10 @@ web/
 | GET | `/api/incidents` | 인시던트 통합 타임라인 `?days=7` (스파이크·블로킹·데드락·KILL·보안·알림 병합) |
 | GET | `/api/status` | 라이브 상태(탭 배지용, DB 히트 없이 수집기 최신 샘플) |
 | POST | `/api/ai/summary` | 현재 스냅샷 AI 요약(Claude, 120초 캐시) |
+| GET | `/api/memory` | 메모리 어드바이저(SGA/PGA/Buffer Cache/Shared Pool advice + 현재 크기) |
+| GET | `/api/undotemp` | Undo(리텐션·구성·undostat) + Temp(사용률·Top 세션) |
+| GET | `/api/checkup` | 통계 신선도 + 인덱스 점검(중복 후보·모니터링 사용여부) |
+| GET/PUT/DELETE | `/api/notes` · `/api/note/:scope/:ref` · `/api/note` | SQL 메모(주석) 목록/조회/저장/삭제 |
 | GET | `/api/archivelog` | 아카이브 로그 생성률(24h) |
 | GET | `/api/segments` | 세그먼트 Top 공간소비(`dba_segments`) |
 | GET | `/api/session/:sid` | 세션 상세(v$session + v$sesstat) |

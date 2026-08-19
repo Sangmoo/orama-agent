@@ -329,6 +329,21 @@ table.expandable tbody tr.expanded { background: var(--bg3); }
 body.compact table th, body.compact table td { padding-top: 2px; padding-bottom: 2px; font-size: 11px; }
 body.compact .metric-grid { gap: 6px; }
 
+/* 어드바이저 (메모리 advice) */
+.advisor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-bottom: 8px; }
+.adv-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.adv-title { font-weight: 700; margin-bottom: 4px; }
+.adv-insight { font-size: 12px; color: var(--muted); margin-bottom: 8px; min-height: 16px; }
+.adv-insight b { color: var(--accent); }
+table tr.adv-cur td { background: color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 600; }
+table tr.adv-cur td:first-child::before { content: "▶ "; color: var(--accent); }
+
+/* SQL 메모 */
+.note-bar { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.note-text { width: 100%; min-height: 140px; resize: vertical; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: var(--sans); font-size: 13px; line-height: 1.5; }
+.note-actions { display: flex; gap: 8px; margin-top: 8px; }
+.sqlid.has-note::after { content: "📝"; font-size: 10px; margin-left: 3px; }
+
 /* 테이블스페이스 포화 예상 */
 .ts-pred { font-weight: 600; white-space: nowrap; }
 .ts-pred.crit { color: var(--danger, #f85149); }

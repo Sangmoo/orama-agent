@@ -378,6 +378,60 @@ app.get('/api/segments', api(async () => {
   catch (e) { return { list: [], error: 'dba_segments 접근 권한이 없습니다: ' + e.message }; }
 }));
 
+// --- 메모리 어드바이저 (SGA/PGA/Buffer Cache/Shared Pool advice) ---
+app.get('/api/memory', api(async () => {
+  const q = (sql) => db.query(sql).catch(() => []);
+  const [current, pgaTarget, sga, pga, cache, shared] = await Promise.all([
+    q(Q.MEM_CURRENT), q(Q.MEM_PGA_TARGET), q(Q.MEM_SGA_ADVICE), q(Q.MEM_PGA_ADVICE), q(Q.MEM_CACHE_ADVICE), q(Q.MEM_SHARED_ADVICE)
+  ]);
+  const err = (!current.length && !cache.length && !shared.length) ? 'v$ advice 뷰 접근 권한이 없거나(SELECT_CATALOG_ROLE) 자동 메모리 관리가 꺼져 있습니다.' : null;
+  return { current, pgaTargetMb: pgaTarget[0] ? pgaTarget[0].MB : null, sga, pga, cache, shared, error: err };
+}));
+
+// --- Undo / Temp 모니터 ---
+app.get('/api/undotemp', api(async () => {
+  const q = (sql) => db.query(sql).catch(() => []);
+  const [retention, undoSummary, undoStat, tempUsage, tempSessions] = await Promise.all([
+    q(Q.UNDO_RETENTION), q(Q.UNDO_SUMMARY), q(Q.UNDO_STAT), q(Q.TEMP_USAGE), q(Q.TEMP_SESSIONS)
+  ]);
+  return {
+    undoRetention: retention[0] ? parseInt(retention[0].VALUE, 10) : null,
+    undoSummary, undoStat, tempUsage, tempSessions
+  };
+}));
+
+// --- 점검: 통계 신선도 + 인덱스 (중복/미사용) ---
+app.get('/api/checkup', api(async () => {
+  const [staleStats, idxMon, redundant] = await Promise.all([
+    db.query(Q.STALE_STATS).catch((e) => ({ error: e.message })),
+    db.query(Q.INDEX_MON_USAGE).catch(() => []),
+    db.query(Q.REDUNDANT_INDEXES).catch((e) => ({ error: e.message }))
+  ]);
+  return {
+    staleStats: Array.isArray(staleStats) ? staleStats : [],
+    staleError: Array.isArray(staleStats) ? null : (staleStats && staleStats.error),
+    indexMon: Array.isArray(idxMon) ? idxMon : [],
+    redundant: Array.isArray(redundant) ? redundant : [],
+    redundantError: Array.isArray(redundant) ? null : (redundant && redundant.error)
+  };
+}));
+
+// --- 메모(주석): scope 별 목록 / 단건 조회 / 저장 / 삭제 ---
+app.get('/api/notes', api(async (req) => ({ list: store.listNotes(String(req.query.scope || 'sql')) })));
+app.get('/api/note/:scope/:ref', api(async (req) => ({ note: store.getNote(String(req.params.scope), String(req.params.ref)) })));
+app.put('/api/note', api(async (req) => {
+  const scope = String((req.body && req.body.scope) || '').trim();
+  const ref = String((req.body && req.body.ref) || '').trim();
+  if (!scope || !ref) throw new Error('scope/ref 필요');
+  store.setNote(scope, ref, (req.body && req.body.note) || '', req.user && req.user.usrId);
+  store.addAudit(req.user && req.user.usrId, 'NOTE', `${scope}:${ref}`, null);
+  return { note: store.getNote(scope, ref) };
+}));
+app.delete('/api/note/:scope/:ref', api(async (req) => {
+  store.deleteNote(String(req.params.scope), String(req.params.ref));
+  return { ok: true };
+}));
+
 // --- 세션 상세 (v$session + v$sesstat) ---
 app.get('/api/session/:sid', api(async (req) => {
   const sid = parseInt(req.params.sid, 10);

@@ -54,6 +54,7 @@
     <button class="tab" data-tab="locks">락/데드락<span class="tab-badge" id="badge-locks"></span></button>
     <button class="tab" data-tab="incidents">인시던트</button>
     <button class="tab" data-tab="capacity">용량</button>
+    <button class="tab" data-tab="advisor">어드바이저</button>
     <button class="tab" data-tab="settings">설정</button>
   </nav>
 
@@ -345,6 +346,95 @@
         </table>
       </div>
       <div class="notice" id="segNotice"></div>
+
+      <div class="sec-head-row"><h3 class="section-h">Undo <span class="sub" id="undoSub"></span></h3></div>
+      <div class="ash-grid">
+        <div>
+          <div class="sec-head-row"><h4 class="section-h" style="font-size:13px">Undo 사용 구성</h4></div>
+          <div class="table-wrap"><table id="undoSummaryTable">
+            <thead><tr><th>테이블스페이스</th><th>상태</th><th>MB</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div style="grid-column:span 2">
+          <div class="sec-head-row"><h4 class="section-h" style="font-size:13px">Undo 통계 (최근 10분 간격)</h4></div>
+          <div class="table-wrap"><table id="undoStatTable">
+            <thead><tr><th>시각</th><th>Undo블록</th><th>트랜잭션</th><th>최장쿼리(s)</th><th title="ORA-01555 snapshot too old 발생 수">01555</th><th>공간부족</th><th>튜닝리텐션(s)</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+      <div class="notice" id="undoNotice"></div>
+
+      <div class="sec-head-row"><h3 class="section-h">Temp</h3></div>
+      <div class="ash-grid">
+        <div>
+          <div class="sec-head-row"><h4 class="section-h" style="font-size:13px">Temp 사용률</h4></div>
+          <div class="table-wrap"><table id="tempUsageTable">
+            <thead><tr><th>테이블스페이스</th><th>Used(MB)</th><th>Free(MB)</th><th>사용률</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div style="grid-column:span 2">
+          <div class="sec-head-row"><h4 class="section-h" style="font-size:13px">Temp 사용 Top 세션 (정렬/해시 spill)</h4></div>
+          <div class="table-wrap"><table id="tempSessTable">
+            <thead><tr><th>SID</th><th>사용자</th><th>프로그램</th><th>테이블스페이스</th><th>MB</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 어드바이저 (메모리 어드바이저 + 통계/인덱스 점검) -->
+    <section class="panel" id="tab-advisor">
+      <div class="sec-head-row"><h3 class="section-h">메모리 어드바이저 <span class="sub" id="memSub"></span></h3></div>
+      <div class="notice" id="memNotice"></div>
+      <div class="advisor-grid">
+        <div class="adv-card">
+          <div class="adv-title">Buffer Cache</div>
+          <div class="adv-insight" id="cacheInsight"></div>
+          <div class="table-wrap"><table id="cacheAdviceTable">
+            <thead><tr><th>크기(MB)</th><th>배수</th><th>예상 물리읽기</th><th>배수</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div class="adv-card">
+          <div class="adv-title">Shared Pool</div>
+          <div class="adv-insight" id="sharedInsight"></div>
+          <div class="table-wrap"><table id="sharedAdviceTable">
+            <thead><tr><th>크기(MB)</th><th>배수</th><th>LC 절약(s)</th><th>로드배수</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div class="adv-card">
+          <div class="adv-title">PGA</div>
+          <div class="adv-insight" id="pgaInsight"></div>
+          <div class="table-wrap"><table id="pgaAdviceTable">
+            <thead><tr><th>대상(MB)</th><th>배수</th><th>캐시적중%</th><th>과할당</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+        <div class="adv-card">
+          <div class="adv-title">SGA Target</div>
+          <div class="adv-insight" id="sgaInsight"></div>
+          <div class="table-wrap"><table id="sgaAdviceTable">
+            <thead><tr><th>SGA(MB)</th><th>배수</th><th>예상 DB Time</th><th>배수</th></tr></thead><tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="sec-head-row"><h3 class="section-h">통계 신선도 (누락·오래됨·변경과다) <span class="sub" id="staleSub"></span></h3><button class="csv-btn" data-csv="stalestats">CSV</button></div>
+      <div class="notice" id="staleNotice"></div>
+      <div class="table-wrap">
+        <table id="staleTable">
+          <thead><tr><th>소유자</th><th>테이블</th><th>행수(통계)</th><th>마지막 분석</th><th>변경건수</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager" id="stalePager"></div>
+
+      <div class="sec-head-row"><h3 class="section-h">중복 인덱스 후보 (선두 컬럼 겹침) <span class="sub" id="redunSub"></span></h3><button class="csv-btn" data-csv="redundant">CSV</button></div>
+      <div class="notice" id="redunNotice"></div>
+      <div class="table-wrap">
+        <table id="redunTable">
+          <thead><tr><th>소유자</th><th>테이블</th><th>중복 인덱스</th><th>컬럼</th><th>상위 인덱스</th><th>컬럼</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager" id="redunPager"></div>
     </section>
 
     <!-- 설정 -->
@@ -424,6 +514,7 @@
         <button class="mtab active" data-mtab="text">SQL 전문</button>
         <button class="mtab" data-mtab="plan">실행계획</button>
         <button class="mtab" data-mtab="tune">✨ AI 튜닝</button>
+        <button class="mtab" data-mtab="note">📝 메모</button>
       </div>
       <pre id="modalBody" class="mpane active"></pre>
       <div id="modalPlan" class="mpane">
@@ -439,6 +530,17 @@
           <span id="tuneMeta" class="ash-note"></span>
         </div>
         <div id="tuneBody" class="tune-body"></div>
+      </div>
+      <div id="modalNote" class="mpane">
+        <div class="note-bar">
+          <span class="ash-note">이 SQL_ID에 대한 팀 메모(알려진 이슈·조치·티켓 등). 모두에게 공유됩니다.</span>
+          <span class="ash-note" id="noteMeta"></span>
+        </div>
+        <textarea id="noteText" class="note-text" placeholder="예: 야간 배치 전용. 인덱스 IX_T_ORDER_DT 추가 검토 중 (티켓 #1234)"></textarea>
+        <div class="note-actions">
+          <button id="noteSave" class="mini-btn">저장</button>
+          <button id="noteDelete" class="mini-btn">삭제</button>
+        </div>
       </div>
     </div>
   </div>

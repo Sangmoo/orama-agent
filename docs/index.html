@@ -138,7 +138,7 @@
   <div class="wrap">
     <div class="sec-h">
       <h2>한 화면에 다 담았습니다</h2>
-      <p>11개 탭 · 실시간 수집기 · 영구 저장까지 하나의 앱으로</p>
+      <p>12개 탭 · 실시간 수집기 · 영구 저장까지 하나의 앱으로</p>
     </div>
     <div class="grid">
       <div class="card"><div class="ico">📊</div><h3>Grafana 스타일 대시보드</h3><p>CPU·AAS·세션·Exec·Reads·TPS 시계열 라이브 차트와 상태 타일. <b>어제 vs 오늘</b> 기준선 비교까지.</p></div>
@@ -148,7 +148,8 @@
       <div class="card"><div class="ico">⛔</div><h3>락 / 데드락 추적</h3><p>실시간 블로킹을 blocker/waiter SQL_ID와 함께 잡아 이력화하고, blocker를 바로 <b>KILL</b>. 데드락(ORA-00060)은 <b>SQLite 영구 저장</b>, 발생 시 <b>탭 배지</b>.</p></div>
       <div class="card"><div class="ico">📧</div><h3>이메일 알림</h3><p>CPU 스파이크·블로킹·TS 포화 감지 시 <b>원인 SQL_ID와 전문 포함</b> 메일을 등록 수신자에게 발송.</p></div>
       <div class="card"><div class="ico">🧭</div><h3>세션 · Top SQL · 진행 작업</h3><p>세션 상세(v$sesstat) 드릴다운, SQL 실행계획, RMAN/인덱스 등 대형 작업 진행률·남은시간. 넓은 표는 <b>행 클릭 확장</b>.</p></div>
-      <div class="card"><div class="ico">🖨️</div><h3>리포트 · UX</h3><p>현재 상태를 <b>HTML/PDF 리포트</b>로 내보내고, <b>다크/라이트 테마</b>·밀도 토글·<b>스마트 새로고침</b>(상호작용 중 일시정지)까지.</p></div>
+      <div class="card"><div class="ico">🧠</div><h3>메모리 어드바이저 · 점검</h3><p>Buffer Cache·Shared Pool·PGA·SGA advice로 <b>"N% 늘리면 물리읽기 M%↓"</b> 권고. <b>Undo/Temp</b>(ORA-01555·spill), <b>통계 신선도</b>·<b>중복 인덱스</b> 점검까지.<span class="tag">라이선스 프리</span></p></div>
+      <div class="card"><div class="ico">🖨️</div><h3>리포트 · 메모 · UX</h3><p>현재 상태를 <b>HTML/PDF 리포트</b>로. SQL_ID에 <b>팀 메모</b> 공유. <b>다크/라이트 테마</b>·밀도 토글·<b>스마트 새로고침</b>(상호작용 중 일시정지)까지.</p></div>
       <div class="card"><div class="ico">💾</div><h3>영구 저장 · 재시작 복원</h3><p>지표·ASH·이벤트·감사로그를 <b>SQLite(Node 내장)</b>에 저장. 서버 재시작에도 차트·이력 유지. 이력 <b>30일 보관</b> 후 자동 삭제.</p></div>
       <div class="card"><div class="ico">🔐</div><h3>로그인 인증 · 감사 로그</h3><p>DB 계정 기반 로그인(비밀번호는 SQL 내 비교, 앱이 평문을 다루지 않음), <b>시도 제한</b>. KILL·설정변경 누가 했는지 기록.</p></div>
       <div class="card"><div class="ico">📈</div><h3>용량 · Prometheus</h3><p>테이블스페이스 <b>포화 예상일(D-day)</b>·아카이브 로그·세그먼트 Top 소비. <code>/metrics</code> + <b>동봉 Grafana 대시보드</b>로 연동.</p></div>

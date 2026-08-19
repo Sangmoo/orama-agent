@@ -510,8 +510,45 @@ function showMtab(which) {
   $('#modalBody').classList.toggle('active', which === 'text');
   $('#modalPlan').classList.toggle('active', which === 'plan');
   $('#modalTune').classList.toggle('active', which === 'tune');
+  $('#modalNote').classList.toggle('active', which === 'note');
 }
 $$('.mtab').forEach((b) => b.onclick = () => showMtab(b.dataset.mtab));
+
+// ---- SQL 메모(주석) ----
+let notedSql = new Set();      // 메모가 있는 SQL_ID 집합 (인디케이터용)
+let noteSqlId = null;          // 현재 모달의 SQL_ID
+async function refreshNotedSql() {
+  const r = await getJSON('/api/notes?scope=sql');
+  if (r.ok) notedSql = new Set((r.data.list || []).map((n) => n.ref));
+}
+async function loadNote(sqlId) {
+  noteSqlId = sqlId;
+  $('#noteText').value = ''; $('#noteMeta').textContent = '불러오는 중…';
+  const r = await getJSON('/api/note/sql/' + encodeURIComponent(sqlId));
+  const n = r.ok ? r.data.note : null;
+  $('#noteText').value = n ? n.note : '';
+  $('#noteMeta').textContent = n ? `최종수정 ${n.usr_id} · ${new Date(n.ts).toLocaleString('ko-KR', { hour12: false })}` : '메모 없음';
+  updateModalNoteTab();
+}
+function updateModalNoteTab() {
+  const has = notedSql.has(noteSqlId);
+  const b = document.querySelector('.mtab[data-mtab="note"]');
+  if (b) b.textContent = has ? '📝 메모 ●' : '📝 메모';
+}
+$('#noteSave').onclick = async () => {
+  if (!noteSqlId) return;
+  const note = $('#noteText').value;
+  const r = await fetch('/api/note', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'sql', ref: noteSqlId, note }) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message }));
+  if (r.ok) {
+    if (note.trim()) notedSql.add(noteSqlId); else notedSql.delete(noteSqlId);
+    toast('메모 저장됨', 'ok'); await loadNote(noteSqlId);
+  } else toast('저장 실패: ' + (r.error || ''), 'err');
+};
+$('#noteDelete').onclick = async () => {
+  if (!noteSqlId) return;
+  await fetch('/api/note/sql/' + encodeURIComponent(noteSqlId), { method: 'DELETE' }).then((x) => x.json()).catch(() => ({}));
+  notedSql.delete(noteSqlId); $('#noteText').value = ''; toast('메모 삭제됨', 'ok'); await loadNote(noteSqlId);
+};
 
 function renderPlan(plan) {
   const tb = $('#planTable tbody');
@@ -540,13 +577,16 @@ function renderPlan(plan) {
 }
 
 function bindSqlLinks() {
-  $$('.sqlid').forEach((el) => el.onclick = async () => {
+  $$('.sqlid').forEach((el) => {
+    el.classList.toggle('has-note', notedSql.has(el.dataset.sql));
+    el.onclick = async () => {
     const id = el.dataset.sql;
     $('#modalTitle').textContent = 'SQL_ID: ' + id;
     $('#modalBody').textContent = '불러오는 중…';
     $('#planTable tbody').innerHTML = '<tr><td colspan="6" class="empty">불러오는 중…</td></tr>';
     $('#planPred').innerHTML = '';
     resetTune(id);
+    loadNote(id);
     showMtab('text');
     $('#modalBack').classList.add('show');
     const [txt, plan] = await Promise.all([
@@ -557,6 +597,7 @@ function bindSqlLinks() {
       ? txt.data.sql_text
       : '(SQL 텍스트를 찾을 수 없습니다 - 커서가 공유풀에서 밀려났을 수 있음)';
     renderPlan(plan.ok ? plan.data.plan : []);
+    };
   });
 }
 $('#modalClose').onclick = () => $('#modalBack').classList.remove('show');
@@ -595,6 +636,7 @@ let tuneSqlId = null;
 let tuneConfig = { configured: false, model: '', effort: '', limits: {} };
 async function loadTuneConfig() { const r = await getJSON('/api/tune/config'); if (r.ok) tuneConfig = r.data; }
 loadTuneConfig();
+refreshNotedSql(); // SQL 메모 인디케이터용 집합 로드
 
 function tuneLimitReached() {
   const L = tuneConfig.limits || {};
@@ -1011,6 +1053,120 @@ async function loadCapacity() {
     <td>${esc(r.OWNER)}</td><td class="mono">${esc(r.SEGMENT_NAME)}</td><td>${esc(r.SEGMENT_TYPE)}</td>
     <td class="mono">${esc(r.TABLESPACE_NAME)}</td><td class="mono">${num(r.MB)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty">데이터 없음</td></tr>';
   $('#segNotice').textContent = (seg.ok && seg.data.error) ? seg.data.error : '';
+
+  loadUndoTemp();
+}
+async function loadUndoTemp() {
+  const r = await getJSON('/api/undotemp');
+  if (!r.ok) return;
+  const d = r.data;
+  // Undo 구성
+  $('#undoSub').textContent = d.undoRetention != null ? `(undo_retention ${num(d.undoRetention)}s)` : '';
+  $('#undoSummaryTable tbody').innerHTML = (d.undoSummary || []).length
+    ? d.undoSummary.map((r) => `<tr><td class="mono">${esc(r.TABLESPACE_NAME)}</td><td class="${r.STATUS === 'ACTIVE' ? 'st-killed' : ''}">${esc(r.STATUS)}</td><td class="mono">${num(r.MB)}</td></tr>`).join('')
+    : emptyRow(3);
+  // Undo 통계 (01555·공간부족 강조)
+  $('#undoStatTable tbody').innerHTML = (d.undoStat || []).length
+    ? d.undoStat.map((r) => `<tr>
+        <td class="mono">${esc(r.T)}</td><td class="mono">${num(r.UNDOBLKS)}</td><td class="mono">${num(r.TXNCOUNT)}</td>
+        <td class="mono">${num(r.MAXQUERYLEN)}</td>
+        <td class="mono ${r.SSOLDERRCNT > 0 ? 'st-killed' : ''}">${num(r.SSOLDERRCNT)}</td>
+        <td class="mono ${r.NOSPACEERRCNT > 0 ? 'st-killed' : ''}">${num(r.NOSPACEERRCNT)}</td>
+        <td class="mono">${num(r.TUNED_UNDORETENTION)}</td></tr>`).join('')
+    : emptyRow(7);
+  const sso = (d.undoStat || []).reduce((a, b) => a + (b.SSOLDERRCNT || 0), 0);
+  $('#undoNotice').textContent = sso > 0 ? `⚠ 최근 구간에 ORA-01555(snapshot too old) ${sso}건 발생 — undo_retention/Undo 크기 점검 필요` : '';
+  // Temp 사용률
+  $('#tempUsageTable tbody').innerHTML = (d.tempUsage || []).length
+    ? d.tempUsage.map((r) => { const tot = (r.USED_MB || 0) + (r.FREE_MB || 0); const pct = tot ? Math.round(r.USED_MB / tot * 100) : 0; return `<tr><td class="mono">${esc(r.TABLESPACE_NAME)}</td><td class="mono">${num(r.USED_MB)}</td><td class="mono">${num(r.FREE_MB)}</td><td class="mono ${pct >= 90 ? 'st-killed' : ''}">${pct}%</td></tr>`; }).join('')
+    : emptyRow(4);
+  // Temp Top 세션
+  $('#tempSessTable tbody').innerHTML = (d.tempSessions || []).length
+    ? d.tempSessions.map((r) => `<tr><td><span class="sid-link" data-sid="${esc(r.SID)}">${esc(r.SID)}</span></td><td>${esc(r.USERNAME)}</td><td class="mono">${esc(r.PROGRAM)}</td><td class="mono">${esc(r.TABLESPACE)}</td><td class="mono">${num(r.MB)}</td></tr>`).join('')
+    : emptyRow(5);
+  bindSidLinks();
+}
+
+// ---- 어드바이저 (메모리 어드바이저 + 통계 신선도 + 인덱스 점검) ----
+function markCurrent(rows) { // factor 1.0 에 가장 가까운 행 인덱스
+  let bi = -1, bd = 1e9;
+  rows.forEach((r, i) => { const f = r.FACTOR != null ? Math.abs(r.FACTOR - 1) : 1e9; if (f < bd) { bd = f; bi = i; } });
+  return bi;
+}
+function advTable(sel, rows, cols, curIdx) {
+  $(sel + ' tbody').innerHTML = rows.length
+    ? rows.map((r, i) => `<tr class="${i === curIdx ? 'adv-cur' : ''}">${cols.map((c) => `<td class="mono">${c.fmt ? c.fmt(r[c.k]) : (r[c.k] != null ? esc(r[c.k]) : '')}</td>`).join('')}${i === curIdx ? '' : ''}</tr>`).join('')
+    : emptyRow(cols.length);
+}
+async function loadAdvisor() {
+  const [mem, chk] = await Promise.all([getJSON('/api/memory'), getJSON('/api/checkup')]);
+  // ---- 메모리 어드바이저 ----
+  if (mem.ok) {
+    const d = mem.data;
+    $('#memNotice').textContent = d.error || '';
+    const bc = d.current.find((x) => /Buffer Cache/i.test(x.NAME));
+    $('#memSub').textContent = bc ? `현재 Buffer Cache ${num(bc.MB)}MB${d.pgaTargetMb ? ' · PGA 목표 ' + num(d.pgaTargetMb) + 'MB' : ''}` : '';
+    const one = (v) => v != null ? (Math.round(v * 100) / 100) : '';
+    // Buffer Cache
+    const ci = markCurrent(d.cache);
+    advTable('#cacheAdviceTable', d.cache, [{ k: 'MB', fmt: num }, { k: 'FACTOR', fmt: one }, { k: 'ESTD_PHYSICAL_READS', fmt: num }, { k: 'READ_FACTOR', fmt: one }], ci);
+    $('#cacheInsight').innerHTML = cacheInsight(d.cache, ci);
+    // Shared Pool
+    const si = markCurrent(d.shared);
+    advTable('#sharedAdviceTable', d.shared, [{ k: 'MB', fmt: num }, { k: 'FACTOR', fmt: one }, { k: 'ESTD_LC_TIME_SAVED', fmt: num }, { k: 'LOAD_FACTOR', fmt: one }], si);
+    // PGA
+    const pi = markCurrent(d.pga);
+    advTable('#pgaAdviceTable', d.pga, [{ k: 'MB', fmt: num }, { k: 'FACTOR', fmt: one }, { k: 'HIT_PCT', fmt: (v) => v + '%' }, { k: 'OVERALLOC', fmt: num }], pi);
+    $('#pgaInsight').innerHTML = pgaInsight(d.pga, pi);
+    // SGA
+    const gi = markCurrent(d.sga);
+    advTable('#sgaAdviceTable', d.sga, [{ k: 'MB', fmt: num }, { k: 'FACTOR', fmt: one }, { k: 'ESTD_DB_TIME', fmt: num }, { k: 'ESTD_DB_TIME_FACTOR', fmt: one }], gi);
+  }
+  // ---- 통계 신선도 ----
+  if (chk.ok) {
+    const c = chk.data;
+    const stale = c.staleStats || [];
+    $('#staleSub').textContent = `(${stale.length}건)`;
+    $('#staleNotice').textContent = c.staleError ? ('통계 조회 불가: ' + c.staleError) : '';
+    registerCsv('stalestats', ['OWNER', 'TABLE', 'NUM_ROWS', 'LAST_ANALYZED', 'CHANGES'], stale.map((r) => [r.OWNER, r.TABLE_NAME, r.NUM_ROWS, r.LAST_ANALYZED, r.CHANGES]));
+    setPager('stalestats', stale, '#stalePager', (slice) => {
+      $('#staleTable tbody').innerHTML = slice.length ? slice.map((r) => `<tr>
+        <td>${esc(r.OWNER)}</td><td class="mono">${esc(r.TABLE_NAME)}</td>
+        <td class="mono">${r.NUM_ROWS != null ? num(r.NUM_ROWS) : '<span class="st-killed">없음</span>'}</td>
+        <td class="mono ${!r.LAST_ANALYZED ? 'st-killed' : ''}">${r.LAST_ANALYZED || '없음'}</td>
+        <td class="mono">${num(r.CHANGES)}</td></tr>`).join('') : emptyRow(5);
+    });
+    // ---- 인덱스 점검 (중복) ----
+    const redun = c.redundant || [];
+    $('#redunSub').textContent = `(${redun.length}건${(c.indexMon || []).length ? ' · 모니터링 ' + c.indexMon.length : ''})`;
+    $('#redunNotice').textContent = c.redundantError ? ('인덱스 조회 불가: ' + c.redundantError)
+      : (redun.length ? '선두 컬럼이 다른 인덱스의 접두어인 인덱스입니다 — 중복일 가능성이 높아 삭제 후보로 검토하세요.' : '중복 인덱스 후보 없음 ✓');
+    registerCsv('redundant', ['OWNER', 'TABLE', 'REDUNDANT_INDEX', 'REDUNDANT_COLS', 'SUPERSET_INDEX', 'SUPERSET_COLS'], redun.map((r) => [r.OWNER, r.TABLE_NAME, r.REDUNDANT_INDEX, r.REDUNDANT_COLS, r.SUPERSET_INDEX, r.SUPERSET_COLS]));
+    setPager('redundant', redun, '#redunPager', (slice) => {
+      $('#redunTable tbody').innerHTML = slice.length ? slice.map((r) => `<tr>
+        <td>${esc(r.OWNER)}</td><td class="mono">${esc(r.TABLE_NAME)}</td>
+        <td class="mono st-killed">${esc(r.REDUNDANT_INDEX)}</td><td class="mono">${esc(r.REDUNDANT_COLS)}</td>
+        <td class="mono">${esc(r.SUPERSET_INDEX)}</td><td class="mono">${esc(r.SUPERSET_COLS)}</td></tr>`).join('') : emptyRow(6);
+    });
+  }
+}
+function cacheInsight(rows, ci) {
+  if (!rows.length || ci < 0) return '';
+  const cur = rows[ci];
+  const best = rows.reduce((a, b) => (b.READ_FACTOR < a.READ_FACTOR ? b : a), rows[0]);
+  if (best.MB > cur.MB && best.READ_FACTOR < 0.97) {
+    return `💡 Buffer Cache를 <b>${num(best.MB)}MB</b>(현재의 ${Math.round(best.FACTOR * 100) / 100}배)로 늘리면 물리읽기 <b>${Math.round((1 - best.READ_FACTOR) * 100)}%</b> 감소 예상`;
+  }
+  return '현재 캐시로 충분 — 추가 확장 효과는 미미합니다.';
+}
+function pgaInsight(rows, pi) {
+  if (!rows.length || pi < 0) return '';
+  const over = rows[pi].OVERALLOC;
+  if (over > 0) {
+    const ok = rows.find((r) => r.OVERALLOC === 0);
+    return ok ? `⚠ 현재 PGA 목표에서 과할당 발생 — <b>${num(ok.MB)}MB</b> 이상 권장(과할당 0)` : '⚠ PGA 과할당 발생 — PGA 목표 상향 검토';
+  }
+  return '현재 PGA 목표에서 과할당 없음 ✓';
 }
 
 // ---- 설정 (알림) ----
@@ -1138,6 +1294,8 @@ async function refresh() {
     loadLongops();
   } else if (currentTab === 'incidents') {
     loadIncidents();
+  } else if (currentTab === 'advisor') {
+    loadAdvisor();
   }
   updateBadges();
   $('#lastUpd').textContent = fmtTime(Date.now());

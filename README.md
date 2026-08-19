@@ -40,7 +40,8 @@ Node.js + Express + `oracledb`(Thick 모드) + 단일 페이지 대시보드. Or
 | **진행 작업** | `v$session_longops` 대형작업(RMAN/인덱스/정렬) 진행률·남은시간 |
 | **락/데드락** | 실시간 블로킹(Blocker KILL) + 블로킹 감지 이력(SQL_ID) + 실제 데드락 이력(alert log ORA-00060, **SQLite 영구 저장 → 즉시 표시**). 이력 표는 **10건씩 페이지네이션**. 실시간 블로킹 발생 시 **탭에 라이브 배지** |
 | **인시던트** | CPU 스파이크·블로킹·데드락·KILL·보안(로그인 잠금)·알림을 **하나의 시간축에 통합**한 타임라인 (유형 필터 + 페이지네이션 + CSV) |
-| **용량** | 테이블스페이스 사용률 + **포화 예상일(증가율 회귀 D-day)** + 아카이브 로그 생성률(24h) + 세그먼트 Top 공간소비 |
+| **용량** | 테이블스페이스 사용률 + **포화 예상일(증가율 회귀 D-day)** + 아카이브 로그 생성률(24h) + 세그먼트 Top 공간소비 + **Undo**(리텐션·ORA-01555 감지) + **Temp**(사용률·정렬/해시 spill Top 세션) |
+| **어드바이저** | **메모리 어드바이저**(Buffer Cache·Shared Pool·PGA·SGA advice로 "N% 늘리면 물리읽기 M%↓" 권고) + **통계 신선도**(누락·오래됨·변경과다 테이블) + **중복 인덱스 후보**(선두 컬럼 겹침) — 모두 라이선스 프리 |
 | **설정** | 이메일 알림 on/off·수신자 관리·테스트발송 + 감지 임계치 조정 + 감사 로그 |
 
 공통 기능
@@ -48,6 +49,7 @@ Node.js + Express + `oracledb`(Thick 모드) + 단일 페이지 대시보드. Or
 - **표 헤더 클릭 정렬** (자동 새로고침에도 유지)
 - **CSV 내보내기** (각 표, Excel 한글 호환 BOM)
 - **복사 버튼** — SQL 전문·실행계획·AI 튜닝 답변 전체 복사 + 답변 내 코드블록별 개별 복사
+- **SQL 메모(주석)** — SQL_ID 모달의 📝 메모 탭에 팀 메모(알려진 이슈·조치·티켓)를 저장·공유, 메모 있는 SQL_ID엔 📝 표식
 - **리포트 스냅샷 export**(🖨️) — 현재 상태(세션·Top SQL·대기·블로킹·용량·인시던트)를 **독립 HTML로 새 창에 생성 → 인쇄로 PDF 저장**
 - **스마트 자동 새로고침**(2/5/10/30초) — 스크롤·선택·입력 중이면 자동 일시정지, 갱신 후 **스크롤 위치 유지**
 - **행 확장 상세**(넓은 표 클릭 시 key/value 펼침) + **표 밀도(compact) 토글**(▤)
@@ -208,6 +210,7 @@ Prometheus 가 scrape → Grafana 데이터소스로 연결. (`/metrics` 는 인
 
 - **ASH 는 `v$active_session_history`(Diagnostic Pack 유료) 를 쓰지 않고** 수집기가 직접 샘플링한 자체 구현입니다.
 - `v$sql_monitor`, `dba_hist_*`(AWR) 등 Diagnostic/Tuning Pack 뷰는 사용하지 않습니다.
+- **메모리 어드바이저**는 `v$sga_target_advice`·`v$pga_target_advice`·`v$db_cache_advice`·`v$shared_pool_advice`(라이선스 프리 advice 뷰)를 사용합니다. 자동 메모리 관리(SGA_TARGET/PGA_AGGREGATE_TARGET)가 설정돼 있어야 값이 채워집니다.
 
 > API 엔드포인트 전체 목록·상세는 [web/README.md](web/README.md) 참고.
 

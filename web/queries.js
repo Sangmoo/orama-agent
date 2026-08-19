@@ -421,6 +421,94 @@ const TABLE_STATS_ALL = `
   SELECT num_rows, blocks, TO_CHAR(last_analyzed, 'YYYY-MM-DD') AS last_analyzed
     FROM all_tables WHERE owner = :owner AND table_name = :tbl`;
 
+// ===== 메모리 어드바이저 (라이선스 프리 advice 뷰) =====
+const MEM_CURRENT = `SELECT name, ROUND(bytes/1048576, 1) AS mb FROM v$sgainfo WHERE bytes > 0`;
+const MEM_PGA_TARGET = `SELECT ROUND(value/1048576) AS mb FROM v$pgastat WHERE name = 'aggregate PGA target parameter'`;
+const MEM_SGA_ADVICE = `
+  SELECT ROUND(sga_size) AS mb, sga_size_factor AS factor,
+         estd_db_time, estd_db_time_factor, estd_physical_reads
+    FROM v$sga_target_advice ORDER BY sga_size`;
+const MEM_PGA_ADVICE = `
+  SELECT ROUND(pga_target_for_estimate/1048576) AS mb, pga_target_factor AS factor,
+         estd_pga_cache_hit_percentage AS hit_pct, estd_overalloc_count AS overalloc
+    FROM v$pga_target_advice ORDER BY pga_target_for_estimate`;
+const MEM_CACHE_ADVICE = `
+  SELECT size_for_estimate AS mb, size_factor AS factor,
+         estd_physical_reads, estd_physical_read_factor AS read_factor
+    FROM v$db_cache_advice
+   WHERE name = 'DEFAULT' AND advice_status = 'ON'
+     AND block_size = (SELECT value FROM v$parameter WHERE name = 'db_block_size')
+   ORDER BY size_for_estimate`;
+const MEM_SHARED_ADVICE = `
+  SELECT shared_pool_size_for_estimate AS mb, shared_pool_size_factor AS factor,
+         estd_lc_time_saved, estd_lc_load_time_factor AS load_factor
+    FROM v$shared_pool_advice ORDER BY shared_pool_size_for_estimate`;
+
+// ===== Undo / Temp =====
+const UNDO_RETENTION = `SELECT value FROM v$parameter WHERE name = 'undo_retention'`;
+const UNDO_SUMMARY = `
+  SELECT tablespace_name, status, ROUND(SUM(bytes)/1048576) AS mb
+    FROM dba_undo_extents GROUP BY tablespace_name, status ORDER BY tablespace_name, status`;
+const UNDO_STAT = `
+  SELECT * FROM (
+    SELECT TO_CHAR(begin_time,'MM-DD HH24:MI') AS t, undoblks, txncount,
+           maxquerylen, ssolderrcnt, nospaceerrcnt, tuned_undoretention
+      FROM v$undostat ORDER BY begin_time DESC
+  ) WHERE ROWNUM <= 24`;
+const TEMP_USAGE = `
+  SELECT th.tablespace_name,
+         ROUND(SUM(th.bytes_used)/1048576) AS used_mb,
+         ROUND(SUM(th.bytes_free)/1048576) AS free_mb
+    FROM v$temp_space_header th GROUP BY th.tablespace_name`;
+const TEMP_SESSIONS = `
+  SELECT * FROM (
+    SELECT s.sid, s.username, s.program, u.tablespace,
+           ROUND(SUM(u.blocks) * (SELECT value FROM v$parameter WHERE name='db_block_size')/1048576) AS mb
+      FROM v$tempseg_usage u JOIN v$session s ON s.saddr = u.session_addr
+     GROUP BY s.sid, s.username, s.program, u.tablespace ORDER BY 5 DESC
+  ) WHERE ROWNUM <= 15`;
+
+// ===== 통계 신선도 / 인덱스 점검 =====
+const STALE_STATS = `
+  SELECT * FROM (
+    SELECT t.owner, t.table_name, t.num_rows,
+           TO_CHAR(t.last_analyzed,'YYYY-MM-DD') AS last_analyzed,
+           NVL(m.inserts,0)+NVL(m.updates,0)+NVL(m.deletes,0) AS changes
+      FROM dba_tables t
+      LEFT JOIN dba_tab_modifications m
+        ON m.table_owner = t.owner AND m.table_name = t.table_name AND m.partition_name IS NULL
+     WHERE t.owner NOT IN ('SYS','SYSTEM','OUTLN','DBSNMP','APPQOSSYS','WMSYS','XDB','CTXSYS','MDSYS','ORDSYS','EXFSYS','ORDDATA','OLAPSYS','SYSMAN','AUDSYS','GSMADMIN_INTERNAL','LBACSYS','DVSYS')
+       AND t.temporary = 'N'
+       AND t.table_name NOT LIKE 'BIN$%'
+       AND (t.last_analyzed IS NULL
+            OR t.last_analyzed < SYSDATE - 30
+            OR (t.num_rows > 0 AND NVL(m.inserts,0)+NVL(m.updates,0)+NVL(m.deletes,0) > t.num_rows * 0.1))
+     ORDER BY t.last_analyzed ASC NULLS FIRST, changes DESC
+  ) WHERE ROWNUM <= 50`;
+// 모니터링(ALTER INDEX .. MONITORING USAGE)이 켜진 인덱스의 사용 여부
+const INDEX_MON_USAGE = `
+  SELECT index_name, table_name, monitoring, used,
+         TO_CHAR(start_monitoring,'YYYY-MM-DD') AS since
+    FROM v$object_usage WHERE ROWNUM <= 100`;
+// 중복(선두 컬럼이 다른 인덱스의 접두어) 인덱스 후보 — 모니터링 없이도 탐지
+const REDUNDANT_INDEXES = `
+  SELECT * FROM (
+    SELECT a.index_owner AS owner, a.table_name, a.index_name AS redundant_index,
+           b.index_name AS superset_index, a.cols AS redundant_cols, b.cols AS superset_cols
+      FROM (SELECT index_owner, table_name, index_name,
+                   LISTAGG(column_name, ',') WITHIN GROUP (ORDER BY column_position) AS cols
+              FROM dba_ind_columns GROUP BY index_owner, table_name, index_name) a,
+           (SELECT index_owner, table_name, index_name,
+                   LISTAGG(column_name, ',') WITHIN GROUP (ORDER BY column_position) AS cols
+              FROM dba_ind_columns GROUP BY index_owner, table_name, index_name) b
+     WHERE a.index_owner = b.index_owner AND a.table_name = b.table_name
+       AND a.index_name <> b.index_name
+       AND b.cols LIKE a.cols || ',%'
+       AND a.index_owner NOT IN ('SYS','SYSTEM','OUTLN','DBSNMP','WMSYS','XDB','CTXSYS','MDSYS','SYSMAN')
+       AND a.table_name NOT LIKE 'BIN$%'
+     ORDER BY a.table_name
+  ) WHERE ROWNUM <= 50`;
+
 module.exports = {
   INSTANCE, DATABASE, SYSMETRICS, SESSION_SUMMARY, SESSIONS,
   TOP_SQL, SQL_FULLTEXT, WAIT_CLASS, ACTIVE_WAITS, BLOCKING, TABLESPACES,
@@ -429,5 +517,8 @@ module.exports = {
   ASH_SAMPLE, ARCHIVE_LOG_RATE, TOP_SEGMENTS, SESSION_ROW, SESSION_STAT,
   AUTH_LOGIN,
   SQLSTAT_BY_ID, PLAN_TABLES, TABLE_COLUMNS, TABLE_COLUMNS_ALL,
-  TABLE_INDEXES, TABLE_INDEXES_ALL, TABLE_STATS, TABLE_STATS_ALL
+  TABLE_INDEXES, TABLE_INDEXES_ALL, TABLE_STATS, TABLE_STATS_ALL,
+  MEM_CURRENT, MEM_PGA_TARGET, MEM_SGA_ADVICE, MEM_PGA_ADVICE, MEM_CACHE_ADVICE, MEM_SHARED_ADVICE,
+  UNDO_RETENTION, UNDO_SUMMARY, UNDO_STAT, TEMP_USAGE, TEMP_SESSIONS,
+  STALE_STATS, INDEX_MON_USAGE, REDUNDANT_INDEXES
 };
