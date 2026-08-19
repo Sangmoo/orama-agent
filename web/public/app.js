@@ -262,7 +262,7 @@ $$('.tab').forEach((t) => t.addEventListener('click', () => {
   currentTab = t.dataset.tab;
   $('#tab-' + currentTab).classList.add('active');
   localStorage.setItem('oramon_tab', currentTab);
-  refresh();
+  refreshWithLoading();
 }));
 
 // ---- 헬스 ----
@@ -1274,31 +1274,62 @@ async function refresh() {
   if (currentTab === 'overview') {
     res = await getJSON('/api/overview'); if (res.ok) renderOverview(res.data);
   } else if (currentTab === 'dashboard') {
-    loadDashboard();
+    await loadDashboard();
   } else if (currentTab === 'ash') {
-    loadAsh();
+    await loadAsh();
   } else if (currentTab === 'capacity') {
-    loadCapacity();
+    await loadCapacity();
   } else if (currentTab === 'settings') {
-    loadSettings();
+    await loadSettings();
   } else if (currentTab === 'locks') {
-    loadLocks();
+    await loadLocks();
   } else if (currentTab === 'sessions') {
     res = await getJSON('/api/sessions'); if (res.ok) renderSessions(res.data);
   } else if (currentTab === 'topsql') {
     res = await getJSON('/api/topsql'); if (res.ok) renderTopSql(res.data);
   } else if (currentTab === 'waits') {
     res = await getJSON('/api/waits'); if (res.ok) renderWaits(res.data);
-    loadBlocking();
+    await loadBlocking();
   } else if (currentTab === 'longops') {
-    loadLongops();
+    await loadLongops();
   } else if (currentTab === 'incidents') {
-    loadIncidents();
+    await loadIncidents();
   } else if (currentTab === 'advisor') {
-    loadAdvisor();
+    await loadAdvisor();
   }
   updateBadges();
   $('#lastUpd').textContent = fmtTime(Date.now());
+}
+// 탭 진입/수동 새로고침 시 로딩 오버레이 표시 (자동 새로고침은 기존 내용 유지 위해 미표시)
+function showPanelLoading(tab) {
+  const panel = document.getElementById('tab-' + tab);
+  if (!panel) return;
+  let ov = document.getElementById('panelLoading');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'panelLoading';
+    ov.innerHTML = '<div class="pl-box"><span class="spin">⏳</span> 조회 중입니다…</div>';
+  }
+  panel.appendChild(ov);
+  void ov.offsetWidth; // 강제 reflow → 트랜지션 적용 (rAF 는 백그라운드 탭에서 안 뜸)
+  ov.classList.add('show');
+}
+function hidePanelLoading() {
+  const ov = document.getElementById('panelLoading');
+  if (ov) ov.classList.remove('show');
+}
+// 로딩 표시와 함께 새로고침 (첫 진입/탭 전환/수동 버튼용)
+// 140ms 넘게 걸리는 조회에서만 오버레이를 띄워 빠른 탭의 깜빡임을 방지한다.
+// 토큰으로 "최신 호출"만 오버레이를 제어 → 중첩 호출 간 show/hide 레이스 방지.
+let loadingToken = 0;
+function refreshWithLoading() {
+  const tab = currentTab;
+  const my = ++loadingToken;
+  const t = setTimeout(() => { if (my === loadingToken) showPanelLoading(tab); }, 140);
+  return Promise.resolve(refresh()).finally(() => {
+    clearTimeout(t);
+    if (my === loadingToken) hidePanelLoading();
+  });
 }
 
 // ---- 스마트 자동 새로고침: 사용자가 상호작용 중이면 일시정지 + 스크롤 위치 유지 ----
@@ -1326,7 +1357,7 @@ function setInterval_(ms) {
   if (ms > 0) timer = setInterval(autoTick, ms);
 }
 $('#intervalSel').addEventListener('change', (e) => { setInterval_(parseInt(e.target.value, 10)); localStorage.setItem('oramon_interval', e.target.value); });
-$('#refreshBtn').addEventListener('click', refresh);
+$('#refreshBtn').addEventListener('click', refreshWithLoading);
 
 // ---- 다크/라이트 테마 토글 (localStorage 유지, <head>에서 초기 적용) ----
 function applyTheme(t) {
@@ -1543,7 +1574,7 @@ let appStarted = false;
 function startApp() {
   hideLogin();
   if (typeof restoreUiPrefs === 'function') restoreUiPrefs();
-  refresh();
+  refreshWithLoading();
   if (!appStarted) { setInterval_(parseInt($('#intervalSel').value, 10)); appStarted = true; }
 }
 

@@ -91,8 +91,14 @@ select, input[type=text] {
 
 /* ---- Panels ---- */
 main { padding: 18px; }
-.panel { display: none; }
+.panel { display: none; position: relative; }
 .panel.active { display: block; }
+
+/* 조회 로딩 오버레이 (탭 진입/수동 새로고침 시) */
+#panelLoading { position: absolute; inset: 0; z-index: 6; display: flex; align-items: flex-start; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .12s ease; background: color-mix(in srgb, var(--bg) 45%, transparent); }
+#panelLoading.show { opacity: 1; }
+#panelLoading .pl-box { margin-top: 56px; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 22px; font-size: 14px; font-weight: 600; color: var(--accent); box-shadow: 0 6px 20px rgba(0,0,0,.28); }
+#panelLoading .spin { display: inline-block; animation: tspin 0.9s linear infinite; margin-right: 6px; }
 .section-h { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin: 20px 0 10px; font-weight: 600; }
 
 /* ---- Overview ---- */
