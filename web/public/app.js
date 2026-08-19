@@ -1115,6 +1115,19 @@ function setInterval_(ms) {
 $('#intervalSel').addEventListener('change', (e) => { setInterval_(parseInt(e.target.value, 10)); localStorage.setItem('oramon_interval', e.target.value); });
 $('#refreshBtn').addEventListener('click', refresh);
 
+// ---- 다크/라이트 테마 토글 (localStorage 유지, <head>에서 초기 적용) ----
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  const b = $('#themeBtn');
+  if (b) { b.textContent = t === 'light' ? '☀️' : '🌙'; b.title = t === 'light' ? '다크 테마로 전환' : '라이트 테마로 전환'; }
+}
+applyTheme(localStorage.getItem('oramon_theme') || 'dark');
+$('#themeBtn').addEventListener('click', () => {
+  const next = (document.documentElement.getAttribute('data-theme') === 'light') ? 'dark' : 'light';
+  localStorage.setItem('oramon_theme', next);
+  applyTheme(next); // SVG 차트는 var() 색을 직접 쓰므로 즉시 재적용됨
+});
+
 // ---- 인증 / 시작 ----
 function showLogin() {
   $('#loginBack').classList.add('show');

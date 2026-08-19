@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ORAMON · Oracle 모니터</title>
+  <script>/* FOUC 방지: CSS 적용 전에 저장된 테마를 즉시 반영 */
+    (function () { try { document.documentElement.setAttribute('data-theme', localStorage.getItem('oramon_theme') || 'dark'); } catch (e) {} })();
+  </script>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -33,6 +36,7 @@
         </select>
       </label>
       <button id="refreshBtn" title="지금 새로고침">⟳</button>
+      <button id="themeBtn" title="다크/라이트 테마 전환">🌙</button>
       <span class="lastupd" id="lastUpd"></span>
     </div>
   </header>
