@@ -1293,19 +1293,45 @@ document.addEventListener('click', (e) => {
 });
 
 // ================= 리포트 스냅샷 export (HTML/PDF) =================
+// 로딩 화면(스핀너) — 클릭 즉시 새 창에 먼저 써서 사용자가 기다릴 수 있게 한다.
+function reportShellHtml(bodyHtml) {
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>ORAMON 리포트 생성 중…</title>
+<style>
+  html,body{height:100%;margin:0}
+  body{font-family:"Segoe UI","Malgun Gothic",sans-serif;color:#1f2328;background:#f6f8fa;display:flex;align-items:center;justify-content:center}
+  .box{text-align:center}
+  .spinner{width:44px;height:44px;border:4px solid #d0d7de;border-top-color:#0969da;border-radius:50%;animation:sp 0.9s linear infinite;margin:0 auto 16px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .msg{font-size:15px;font-weight:600} .sub{color:#656d76;font-size:12px;margin-top:6px}
+  .err{color:#cf222e;font-weight:600}
+</style></head><body><div class="box">${bodyHtml}</div></body></html>`;
+}
+function writeToReportWindow(w, html) { if (!w || w.closed) return; try { w.document.open(); w.document.write(html); w.document.close(); } catch (_) {} }
+
 $('#reportBtn').addEventListener('click', async () => {
-  const btn = $('#reportBtn'); btn.disabled = true;
+  const btn = $('#reportBtn');
+  if (btn.dataset.busy === '1') return;
+  btn.dataset.busy = '1'; btn.disabled = true; btn.classList.add('busy');
+  const prev = btn.textContent; btn.textContent = '⏳';
+  // 1) 클릭 즉시 새 창 + 로딩 화면 (팝업 차단 회피 + 즉각 피드백)
+  const w = window.open('', '_blank');
+  if (!w) { toast('팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해 주세요.', 'err'); btn.disabled = false; btn.classList.remove('busy'); btn.textContent = prev; btn.dataset.busy = ''; return; }
+  writeToReportWindow(w, reportShellHtml('<div class="spinner"></div><div class="msg">📄 리포트 생성 중…</div><div class="sub">현재 상태를 수집하고 있습니다. 잠시만 기다려 주세요.</div>'));
+  toast('리포트 생성 중…', 'ok');
   try {
     const [ov, top, wait, blk, ts, inc] = await Promise.all([
       getJSON('/api/overview'), getJSON('/api/topsql'), getJSON('/api/waits'),
       getJSON('/api/blocking'), getJSON('/api/tablespaces'), getJSON('/api/incidents?days=1')
     ]);
+    // 2) 데이터 준비되면 로딩 화면을 리포트로 교체
     const html = buildReportHtml({ ov: ov.data || {}, top: top.data || {}, wait: wait.data || {}, blk: blk.data || {}, ts: ts.data || {}, inc: inc.data || {} });
-    const w = window.open('', '_blank');
-    if (!w) { toast('팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.', 'err'); return; }
-    w.document.open(); w.document.write(html); w.document.close();
-  } catch (e) { toast('리포트 생성 실패: ' + e.message, 'err'); }
-  finally { btn.disabled = false; }
+    writeToReportWindow(w, html);
+  } catch (e) {
+    writeToReportWindow(w, reportShellHtml(`<div class="msg err">리포트 생성 실패</div><div class="sub">${esc(e.message)}</div>`));
+    toast('리포트 생성 실패: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false; btn.classList.remove('busy'); btn.textContent = prev; btn.dataset.busy = '';
+  }
 });
 function buildReportHtml(d) {
   const now = new Date().toLocaleString('ko-KR', { hour12: false });

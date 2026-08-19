@@ -77,6 +77,7 @@ select, input[type=text] {
 #refreshBtn:hover, #themeBtn:hover, #reportBtn:hover, #densityBtn:hover { background: var(--border); }
 #themeBtn, #reportBtn, #densityBtn { font-size: 14px; }
 #refreshBtn:disabled, #reportBtn:disabled { opacity: .5; cursor: default; }
+#reportBtn.busy { animation: tspin 0.9s linear infinite; opacity: 1; }
 .lastupd { color: var(--muted); font-size: 11px; min-width: 74px; }
 
 /* ---- Tabs ---- */
