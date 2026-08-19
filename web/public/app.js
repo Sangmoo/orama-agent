@@ -956,8 +956,40 @@ async function loadAsh() {
     <td>${esc(r.machine)}</td><td class="mono">${num(r.samples)}</td><td class="mono">${num(r.sqls)}</td></tr>`).join('') : emptyRow(5);
 
   bindSqlLinks(); bindSidLinks();
+  loadHeatmap(minutes);
 }
 $('#ashWindow').addEventListener('change', loadAsh);
+
+// AAS 액티비티 히트맵 (대기클래스 × 시간)
+const HEATMAP_COLORS = {
+  'ON CPU': '#3fb950', 'User I/O': '#58a6ff', 'System I/O': '#1f6feb', 'Concurrency': '#f85149',
+  'Application': '#db61a2', 'Commit': '#d29922', 'Configuration': '#bc8cff', 'Network': '#39c5cf',
+  'Cluster': '#e3b341', 'Scheduler': '#8b949e', 'Administrative': '#a371f7', 'Queueing': '#ff7b72', 'Other': '#6e7681'
+};
+async function loadHeatmap(minutes) {
+  const res = await getJSON('/api/ash/heatmap?minutes=' + minutes);
+  const el = $('#ashHeatmap');
+  if (!res.ok) { el.innerHTML = ''; return; }
+  const d = res.data;
+  if (!d.classes.length || !d.times.length) { el.innerHTML = '<div class="empty" style="padding:16px">샘플이 아직 없습니다.</div>'; return; }
+  const max = d.max || 1;
+  const fmtHm = (t) => { const x = new Date(t); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
+  // 시간축 라벨(약 6개)
+  const step = Math.max(1, Math.floor(d.times.length / 6));
+  let axis = '<div class="hm-axis"><span class="hm-rowlabel"></span><span class="hm-cells">';
+  d.times.forEach((t, i) => { axis += `<span class="hm-tick">${i % step === 0 ? fmtHm(t) : ''}</span>`; });
+  axis += '</span></div>';
+  let rows = '';
+  for (const c of d.classes) {
+    const cells = d.cells[c].map((v, i) => {
+      const op = v ? (0.15 + 0.85 * (v / max)) : 0;
+      const bg = v ? HEATMAP_COLORS[c] || '#58a6ff' : 'transparent';
+      return `<span class="hm-cell" style="background:${bg};opacity:${op || 1};${v ? '' : 'background:var(--bg3)'}" title="${c} · ${fmtHm(d.times[i])} · ${v} 샘플"></span>`;
+    }).join('');
+    rows += `<div class="hm-row"><span class="hm-rowlabel" style="color:${HEATMAP_COLORS[c] || 'var(--text)'}">${esc(c)}</span><span class="hm-cells">${cells}</span></div>`;
+  }
+  el.innerHTML = rows + axis;
+}
 
 // ---- 용량 (테이블스페이스 + 아카이브 + 세그먼트) ----
 async function loadCapacity() {
@@ -1104,13 +1136,36 @@ async function refresh() {
     loadBlocking();
   } else if (currentTab === 'longops') {
     loadLongops();
+  } else if (currentTab === 'incidents') {
+    loadIncidents();
   }
+  updateBadges();
   $('#lastUpd').textContent = fmtTime(Date.now());
 }
 
+// ---- 스마트 자동 새로고침: 사용자가 상호작용 중이면 일시정지 + 스크롤 위치 유지 ----
+let interactUntil = 0;
+document.addEventListener('pointerdown', (e) => { if (e.target.closest('table')) interactUntil = Date.now() + 4000; });
+document.addEventListener('scroll', (e) => { if (e.target.closest && e.target.closest('.table-wrap')) interactUntil = Date.now() + 3000; }, true);
+function refreshPaused() {
+  if (document.hidden) return true;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return true;
+  if (Date.now() < interactUntil) return true;
+  const sel = window.getSelection && window.getSelection().toString();
+  if (sel && sel.length > 0) return true;
+  return false;
+}
+async function autoTick() {
+  if (refreshPaused()) return; // 상호작용 중이면 이번 틱 건너뜀
+  const wraps = [...document.querySelectorAll('#tab-' + currentTab + ' .table-wrap')];
+  const pos = wraps.map((w) => [w, w.scrollLeft, w.scrollTop]);
+  await refresh();
+  pos.forEach(([w, l, t]) => { w.scrollLeft = l; w.scrollTop = t; }); // 갱신 후 스크롤 복원
+}
 function setInterval_(ms) {
   if (timer) { clearInterval(timer); timer = null; }
-  if (ms > 0) timer = setInterval(refresh, ms);
+  if (ms > 0) timer = setInterval(autoTick, ms);
 }
 $('#intervalSel').addEventListener('change', (e) => { setInterval_(parseInt(e.target.value, 10)); localStorage.setItem('oramon_interval', e.target.value); });
 $('#refreshBtn').addEventListener('click', refresh);
@@ -1127,6 +1182,169 @@ $('#themeBtn').addEventListener('click', () => {
   localStorage.setItem('oramon_theme', next);
   applyTheme(next); // SVG 차트는 var() 색을 직접 쓰므로 즉시 재적용됨
 });
+
+// ================= 인시던트 통합 타임라인 =================
+let incData = [], incActiveTypes = null;
+const INC_TYPES = {
+  CPU: { i: '🔥', l: 'CPU', c: 'inc-cpu' }, BLOCK: { i: '⛔', l: '블로킹', c: 'inc-block' },
+  DEADLOCK: { i: '💀', l: '데드락', c: 'inc-dead' }, KILL: { i: '✂️', l: 'KILL', c: 'inc-kill' },
+  SECURITY: { i: '🔒', l: '보안', c: 'inc-sec' }, ALERT: { i: '📧', l: '알림', c: 'inc-alert' }
+};
+async function loadIncidents() {
+  const days = parseInt($('#incDays').value, 10);
+  const res = await getJSON('/api/incidents?days=' + days);
+  if (!res.ok) return;
+  incData = res.data.list || [];
+  if (incActiveTypes === null) incActiveTypes = new Set(Object.keys(INC_TYPES));
+  renderIncFilters();
+  renderIncidents();
+}
+function renderIncFilters() {
+  const counts = {}; for (const it of incData) counts[it.type] = (counts[it.type] || 0) + 1;
+  $('#incFilters').innerHTML = Object.keys(INC_TYPES).map((t) => {
+    const on = incActiveTypes.has(t);
+    return `<button class="inc-chip ${INC_TYPES[t].c} ${on ? 'on' : 'off'}" data-inc="${t}">${INC_TYPES[t].i} ${INC_TYPES[t].l} ${counts[t] || 0}</button>`;
+  }).join('');
+  $$('#incFilters .inc-chip').forEach((b) => b.onclick = () => {
+    const t = b.dataset.inc; incActiveTypes.has(t) ? incActiveTypes.delete(t) : incActiveTypes.add(t);
+    renderIncFilters(); renderIncidents();
+  });
+}
+function renderIncidents() {
+  const list = incData.filter((it) => incActiveTypes.has(it.type));
+  $('#incSub').textContent = `(${list.length}건 / 전체 ${incData.length})`;
+  registerCsv('incidents', ['시각', '유형', '내용', '상세'],
+    list.map((it) => [new Date(it.ts).toLocaleString('ko-KR', { hour12: false }), (INC_TYPES[it.type] || {}).l || it.type, it.title, it.detail]));
+  setPager('incidents', list, '#incPager', (slice) => {
+    $('#incTable tbody').innerHTML = slice.length ? slice.map((it) => {
+      const T = INC_TYPES[it.type] || { i: '•', l: it.type, c: '' };
+      const sql = it.sqlId ? `<span class="sqlid" data-sql="${esc(it.sqlId)}">${esc(it.sqlId)}</span> ` : '';
+      return `<tr>
+        <td class="mono">${esc(new Date(it.ts).toLocaleString('ko-KR', { hour12: false }))}</td>
+        <td><span class="inc-tag ${T.c}">${T.i} ${esc(T.l)}</span></td>
+        <td>${esc(it.title)}</td>
+        <td class="mono sqltext" title="${esc(it.detail || '')}">${sql}${esc(it.detail || '')}</td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="4" class="empty">해당 기간·유형의 인시던트 없음</td></tr>';
+    bindSqlLinks();
+  });
+}
+$('#incDays').addEventListener('change', loadIncidents);
+
+// ================= 탭 라이브 배지 =================
+async function updateBadges() {
+  try {
+    const r = await getJSON('/api/status');
+    if (!r.ok) return;
+    const b = r.data.blocked || 0;
+    const el = $('#badge-locks');
+    if (el) { if (b > 0) { el.textContent = b; el.classList.add('show'); } else { el.textContent = ''; el.classList.remove('show'); } }
+  } catch (e) {}
+}
+
+// ================= "지금 상황 AI 요약" =================
+$('#aiSummaryBtn').addEventListener('click', async () => {
+  const btn = $('#aiSummaryBtn'), body = $('#aiSummaryBody');
+  btn.disabled = true;
+  body.innerHTML = '<span class="ash-note"><span class="spin" style="display:inline-block">✨</span> 현재 스냅샷 분석 중…</span>';
+  try {
+    const resp = await fetch('/api/ai/summary', { method: 'POST' });
+    if (resp.status === 401) { showLogin(); btn.disabled = false; return; }
+    const r = await resp.json();
+    if (!r.ok) { body.innerHTML = `<span class="empty">${esc(r.error || '요약 실패')}</span>`; }
+    else {
+      const d = r.data;
+      body.innerHTML = renderMarkdown(d.text) +
+        `<div class="ash-note" style="margin-top:8px">${esc(d.model || '')}${d.cached ? ' · 캐시' : ''} · ${new Date(d.ts).toLocaleTimeString('ko-KR', { hour12: false })}</div>`;
+    }
+  } catch (e) { body.innerHTML = `<span class="empty">요청 실패: ${esc(e.message)}</span>`; }
+  btn.disabled = false;
+});
+
+// ================= 표 밀도(compact) 토글 =================
+function applyDensity(d) {
+  document.body.classList.toggle('compact', d === 'compact');
+  const b = $('#densityBtn');
+  if (b) b.title = d === 'compact' ? '표 밀도: 촘촘 (클릭 시 넓게)' : '표 밀도: 넓게 (클릭 시 촘촘)';
+}
+applyDensity(localStorage.getItem('oramon_density') || 'normal');
+$('#densityBtn').addEventListener('click', () => {
+  const next = document.body.classList.contains('compact') ? 'normal' : 'compact';
+  localStorage.setItem('oramon_density', next); applyDensity(next);
+});
+
+// ================= 행 확장 상세 (넓은 표를 key/value 로 펼침) =================
+document.addEventListener('click', (e) => {
+  const tr = e.target.closest('table.expandable tbody tr');
+  if (!tr || tr.classList.contains('row-detail')) return;
+  if (e.target.closest('.sqlid, .sid-link, button, a, .kill-btn')) return;
+  const table = tr.closest('table');
+  const nxt = tr.nextElementSibling;
+  if (nxt && nxt.classList.contains('row-detail')) { nxt.remove(); tr.classList.remove('expanded'); return; }
+  table.querySelectorAll('tr.row-detail').forEach((r) => r.remove());
+  table.querySelectorAll('tr.expanded').forEach((r) => r.classList.remove('expanded'));
+  const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+  const cells = [...tr.children];
+  const kv = heads.map((h, i) => cells[i] ? `<div class="rd-item"><span class="rd-k">${esc(h)}</span><span class="rd-v">${esc(cells[i].textContent.trim() || '—')}</span></div>` : '').join('');
+  const dr = document.createElement('tr');
+  dr.className = 'row-detail';
+  dr.innerHTML = `<td colspan="${cells.length}"><div class="rd-grid">${kv}</div></td>`;
+  tr.after(dr); tr.classList.add('expanded');
+});
+
+// ================= 리포트 스냅샷 export (HTML/PDF) =================
+$('#reportBtn').addEventListener('click', async () => {
+  const btn = $('#reportBtn'); btn.disabled = true;
+  try {
+    const [ov, top, wait, blk, ts, inc] = await Promise.all([
+      getJSON('/api/overview'), getJSON('/api/topsql'), getJSON('/api/waits'),
+      getJSON('/api/blocking'), getJSON('/api/tablespaces'), getJSON('/api/incidents?days=1')
+    ]);
+    const html = buildReportHtml({ ov: ov.data || {}, top: top.data || {}, wait: wait.data || {}, blk: blk.data || {}, ts: ts.data || {}, inc: inc.data || {} });
+    const w = window.open('', '_blank');
+    if (!w) { toast('팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.', 'err'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  } catch (e) { toast('리포트 생성 실패: ' + e.message, 'err'); }
+  finally { btn.disabled = false; }
+});
+function buildReportHtml(d) {
+  const now = new Date().toLocaleString('ko-KR', { hour12: false });
+  const E = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const tbl = (headers, rows) => `<table><thead><tr>${headers.map((h) => `<th>${E(h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${r.map((c) => `<td>${E(c)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${headers.length}" style="text-align:center;color:#888">없음</td></tr>`}</tbody></table>`;
+  const inst = (d.ov.instance || {}), dbi = (d.ov.database || {}), ss = (d.ov.sessionSummary || d.ov.sessions || {});
+  const top = (d.top.list || []).slice(0, 15).map((r) => [r.SQL_ID, r.EXECUTIONS, r.ELAPSED_SEC, r.SEC_PER_EXEC, r.BUFFER_GETS, r.SCHEMA]);
+  const waits = (d.wait.active || d.wait.activeWaits || []).slice(0, 10).map((r) => [r.EVENT || r.event, r.WAIT_CLASS || r.wait_class, r.CNT || r.SESSIONS || r.cnt || '']);
+  const blk = (d.blk.list || []).map((r) => [r.WAIT_SEC, `${r.WAITER_SID}→${r.BLOCKER_SID}`, r.WAITER_USER, r.BLOCKER_USER, r.LOCKED_OBJ]);
+  const tss = (d.ts.list || []).map((r) => [r.TABLESPACE_NAME, r.USED_PCT + '%', r.TOTAL_MB, r.FREE_MB, r.PREDICT && r.PREDICT.status === 'growing' ? `D-${r.PREDICT.daysToFull} (${r.PREDICT.fullDate})` : (r.PREDICT && r.PREDICT.status === 'stable' ? '안정' : '-')]);
+  const incs = (d.inc.list || []).slice(0, 40).map((it) => [new Date(it.ts).toLocaleString('ko-KR', { hour12: false }), (INC_TYPES[it.type] || {}).l || it.type, it.title, it.detail]);
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>ORAMON 리포트 · ${E(now)}</title>
+<style>
+  body{font-family:"Segoe UI","Malgun Gothic",sans-serif;color:#1f2328;margin:24px;font-size:12px}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:14px;margin:20px 0 6px;border-bottom:2px solid #0969da;padding-bottom:3px;color:#0969da}
+  .meta{color:#656d76;margin-bottom:8px} .kv{display:flex;flex-wrap:wrap;gap:6px 24px;margin:6px 0}
+  .kv span{color:#656d76} table{border-collapse:collapse;width:100%;margin:4px 0 8px}
+  th,td{border:1px solid #d0d7de;padding:4px 8px;text-align:left} th{background:#eef1f5}
+  tr:nth-child(even) td{background:#f6f8fa} .noprint{margin:10px 0}
+  button{background:#0969da;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:13px}
+  @media print{.noprint{display:none}}
+</style></head><body>
+  <div class="noprint"><button onclick="window.print()">🖨️ 인쇄 / PDF 저장</button></div>
+  <h1>◎ ORAMON 상태 리포트</h1>
+  <div class="meta">생성: ${E(now)} · 인스턴스 ${E(inst.INSTANCE_NAME || inst.instance_name || '-')} · DB ${E(dbi.NAME || dbi.name || '-')}</div>
+  <h2>세션 요약</h2>
+  <div class="kv"><div><span>활성</span> ${E(ss.ACTIVE ?? ss.active ?? '-')}</div><div><span>블로킹</span> ${E(ss.BLOCKED ?? ss.blocked ?? '-')}</div><div><span>전체</span> ${E(ss.TOTAL ?? ss.total ?? '-')}</div></div>
+  <h2>Top SQL (상위 15)</h2>
+  ${tbl(['SQL_ID', '실행수', 'Elapsed(s)', '초/실행', 'Buffer Gets', '스키마'], top)}
+  <h2>활성 대기 (상위 10)</h2>
+  ${tbl(['이벤트', 'Class', '세션'], waits)}
+  <h2>블로킹</h2>
+  ${tbl(['대기(s)', 'Waiter→Blocker', 'Waiter User', 'Blocker User', '잠긴 객체'], blk)}
+  <h2>테이블스페이스</h2>
+  ${tbl(['테이블스페이스', '사용률', 'Total(MB)', 'Free(MB)', '포화 예상'], tss)}
+  <h2>최근 24시간 인시던트</h2>
+  ${tbl(['시각', '유형', '내용', '상세'], incs)}
+</body></html>`;
+}
 
 // ---- 인증 / 시작 ----
 function showLogin() {

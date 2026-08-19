@@ -36,6 +36,8 @@
         </select>
       </label>
       <button id="refreshBtn" title="지금 새로고침">⟳</button>
+      <button id="reportBtn" title="현재 상태 리포트(HTML/PDF)">🖨️</button>
+      <button id="densityBtn" title="표 밀도 전환(넓게/촘촘히)">▤</button>
       <button id="themeBtn" title="다크/라이트 테마 전환">🌙</button>
       <span class="lastupd" id="lastUpd"></span>
     </div>
@@ -49,7 +51,8 @@
     <button class="tab" data-tab="topsql">Top SQL</button>
     <button class="tab" data-tab="waits">대기 이벤트</button>
     <button class="tab" data-tab="longops">진행 작업</button>
-    <button class="tab" data-tab="locks">락/데드락</button>
+    <button class="tab" data-tab="locks">락/데드락<span class="tab-badge" id="badge-locks"></span></button>
+    <button class="tab" data-tab="incidents">인시던트</button>
     <button class="tab" data-tab="capacity">용량</button>
     <button class="tab" data-tab="settings">설정</button>
   </nav>
@@ -58,6 +61,13 @@
     <!-- 개요 -->
     <section class="panel active" id="tab-overview">
       <div class="grid-inst" id="instBox"></div>
+      <div class="ai-summary-card" id="aiSummaryCard">
+        <div class="ai-sum-head">
+          <span class="ai-sum-title">✨ 지금 상황 AI 요약</span>
+          <button id="aiSummaryBtn" class="mini-btn">요약 생성</button>
+        </div>
+        <div class="ai-sum-body" id="aiSummaryBody"><span class="ash-note">현재 스냅샷(Top SQL·대기·블로킹)을 요약합니다. 버튼을 눌러주세요.</span></div>
+      </div>
       <h3 class="section-h">성능 지표</h3>
       <div class="metric-grid" id="metricGrid"></div>
     </section>
@@ -122,6 +132,10 @@
         <div class="cp-head"><span class="cp-title">평균 활성 세션(AAS) 추이</span></div>
         <div id="ashTimeline"></div>
       </div>
+      <div class="chart-panel" style="margin-bottom:14px">
+        <div class="cp-head"><span class="cp-title">액티비티 히트맵 (대기클래스 × 시간)</span></div>
+        <div id="ashHeatmap" class="heatmap-wrap"></div>
+      </div>
       <div class="ash-grid">
         <div>
           <div class="sec-head-row"><h3 class="section-h">Top SQL (샘플 수)</h3><button class="csv-btn" data-csv="ashsql">CSV</button></div>
@@ -152,7 +166,7 @@
         <button class="csv-btn" data-csv="sessions">CSV</button>
       </div>
       <div class="table-wrap">
-        <table id="sessTable">
+        <table id="sessTable" class="expandable">
           <thead>
             <tr>
               <th>SID</th><th>Serial</th><th>사용자</th><th>상태</th>
@@ -172,7 +186,7 @@
         <button class="csv-btn" data-csv="topsql">CSV</button>
       </div>
       <div class="table-wrap">
-        <table id="sqlTable">
+        <table id="sqlTable" class="expandable">
           <thead>
             <tr>
               <th>SQL_ID</th><th>실행수</th><th>Elapsed(s)</th><th>초/실행</th>
@@ -280,6 +294,29 @@
         </table>
       </div>
       <div class="pager" id="deadlockPager"></div>
+    </section>
+
+    <!-- 인시던트 통합 타임라인 -->
+    <section class="panel" id="tab-incidents">
+      <div class="toolbar">
+        <label class="refresh">기간
+          <select id="incDays">
+            <option value="1">최근 1일</option>
+            <option value="7" selected>최근 7일</option>
+            <option value="30">최근 30일</option>
+          </select>
+        </label>
+        <span class="inc-filters" id="incFilters"></span>
+        <button class="csv-btn" data-csv="incidents" style="margin-left:auto">CSV</button>
+      </div>
+      <div class="sec-head-row"><h3 class="section-h">인시던트 타임라인 <span class="sub" id="incSub"></span></h3></div>
+      <div class="table-wrap">
+        <table id="incTable">
+          <thead><tr><th>시각</th><th>유형</th><th>내용</th><th>상세</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager" id="incPager"></div>
     </section>
 
     <!-- 용량 (테이블스페이스 + 아카이브 + 세그먼트) -->

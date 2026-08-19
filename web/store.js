@@ -239,7 +239,20 @@ function insertDeadlocks(list) {
 }
 function getDeadlocks(limit = 100) {
   if (!db) return [];
-  return db.prepare(`SELECT t, trace FROM deadlocks ORDER BY ts DESC LIMIT ?`).all(limit);
+  return db.prepare(`SELECT ts, t, trace FROM deadlocks ORDER BY ts DESC LIMIT ?`).all(limit);
+}
+
+// ASH 히트맵: 구간을 buckets 개로 나눠 (버킷 × wait_class) 샘플 수 집계
+function ashHeatmap(from, to, buckets = 48) {
+  if (!db) return { bsize: 0, rows: [] };
+  const bsize = Math.max(1000, Math.ceil(Math.max(1, to - from) / buckets));
+  // node:sqlite 는 JS number 를 REAL 로 바인딩 → 정수 나눗셈이 안 되므로 CAST(.. AS INTEGER) 로 버킷 정렬
+  const rows = db.prepare(
+    `SELECT CAST(ts/? AS INTEGER)*? AS bucket, COALESCE(NULLIF(wait_class,''),'ON CPU') AS wc, COUNT(*) c
+       FROM ash WHERE ts BETWEEN ? AND ?
+      GROUP BY CAST(ts/? AS INTEGER), wc ORDER BY bucket`
+  ).all(bsize, bsize, from, to, bsize);
+  return { bsize, rows };
 }
 
 // ---- 테이블스페이스 사용량 시계열 (증가 예측용, 라이선스 프리 자체 수집) ----
@@ -282,5 +295,5 @@ module.exports = {
   listRecipients, addRecipient, removeRecipient, logAlert, getAlertLog,
   addAudit, getAudit, getSetting, setSetting,
   getTuneCache, setTuneCache, addTuneCall, tuneCallsSince, lastTuneCall,
-  insertDeadlocks, getDeadlocks, insertTsUsage, getTsSamples, prune
+  insertDeadlocks, getDeadlocks, ashHeatmap, insertTsUsage, getTsSamples, prune
 };

@@ -224,4 +224,36 @@ async function suggestStream(sqlId, opts, cb) {
   cb.done({ ...result, cached: false });
 }
 
-module.exports = { suggest, suggestStream, isConfigured, limits, MODEL, EFFORT };
+// ---- "지금 상황 AI 요약" (현재 스냅샷을 근거로 짧은 상태 요약) ----
+let summaryCache = null; // { text, model, ts }
+const SUMMARY_TTL_MS = 120000; // 120초 캐시(비용/스팸 방지)
+async function summarizeState(opts = {}) {
+  if (!opts.force && summaryCache && Date.now() - summaryCache.ts < SUMMARY_TTL_MS) {
+    return { ...summaryCache, cached: true };
+  }
+  if (!ready()) throw new Error('ANTHROPIC_API_KEY 가 설정되지 않았습니다 (.env 확인).');
+  const [sess, topsql, waits, block] = await Promise.all([
+    db.query(Q.SESSION_SUMMARY).catch(() => []),
+    db.query(Q.TOP_SQL).catch(() => []),
+    db.query(Q.ACTIVE_WAITS).catch(() => []),
+    db.query(Q.BLOCKING).catch(() => [])
+  ]);
+  const ctx = [
+    '## 세션 요약\n' + JSON.stringify(sess.slice(0, 10)),
+    '## Top SQL (상위 5)\n' + JSON.stringify(topsql.slice(0, 5)),
+    '## 활성 대기 (상위 8)\n' + JSON.stringify(waits.slice(0, 8)),
+    '## 블로킹\n' + JSON.stringify(block.slice(0, 5))
+  ].join('\n\n');
+  const resp = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1200,
+    output_config: { effort: 'low' },
+    system: '당신은 Oracle 성능 모니터링 어시스턴트입니다. 주어진 실시간 스냅샷을 근거로 현재 DB 상태를 한국어로 아주 간결히 요약하세요. 형식: 첫 줄에 상태 한 문장(정상/주의/경고 중 하나로 시작), 이어서 핵심 관찰 2~4개를 "- " 불릿으로, 마지막 줄에 조치가 필요하면 "주의:" 로 1~2개. 근거 없는 추측은 금지하고 제공된 수치만 사용하세요.',
+    messages: [{ role: 'user', content: `다음은 현재 Oracle 스냅샷입니다. 상태를 요약해 주세요.\n\n${ctx}` }]
+  });
+  const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+  summaryCache = { text: text || '(요약이 비어 있습니다)', model: resp.model, ts: Date.now() };
+  return { ...summaryCache, cached: false };
+}
+
+module.exports = { suggest, suggestStream, summarizeState, isConfigured, limits, MODEL, EFFORT };

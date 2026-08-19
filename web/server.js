@@ -292,6 +292,80 @@ app.get('/api/ash', api(async (req) => {
   };
 }));
 
+// --- ASH 액티비티 히트맵 (버킷 × 대기클래스) ---
+app.get('/api/ash/heatmap', api(async (req) => {
+  const minutes = Math.min(1440, Math.max(1, parseInt(req.query.minutes || '15', 10)));
+  const buckets = Math.min(96, Math.max(12, parseInt(req.query.buckets || '48', 10)));
+  const to = Date.now();
+  const from = to - minutes * 60000;
+  const { bsize, rows } = store.ashHeatmap(from, to, buckets);
+  // 연속 버킷 타임라인 생성
+  const b0 = Math.floor(from / bsize) * bsize;
+  const times = [];
+  for (let t = b0; t <= to; t += bsize) times.push(t);
+  const order = ['ON CPU', 'User I/O', 'System I/O', 'Concurrency', 'Application', 'Commit', 'Configuration', 'Network', 'Cluster', 'Scheduler', 'Administrative', 'Queueing', 'Other'];
+  const present = [...new Set(rows.map((r) => r.wc))];
+  const classes = order.filter((c) => present.includes(c)).concat(present.filter((c) => !order.includes(c)));
+  const idx = new Map(times.map((t, i) => [t, i]));
+  const cells = {}; let max = 0;
+  for (const c of classes) cells[c] = new Array(times.length).fill(0);
+  for (const r of rows) {
+    const i = idx.get(r.bucket);
+    if (i != null && cells[r.wc]) { cells[r.wc][i] = r.c; if (r.c > max) max = r.c; }
+  }
+  return { minutes, times, classes, cells, max, bsize };
+}));
+
+// --- 인시던트 통합 타임라인 (스파이크·블로킹·데드락·KILL·보안·알림) ---
+app.get('/api/incidents', api(async (req) => {
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days || '7', 10)));
+  const since = Date.now() - days * 86400000;
+  const items = [];
+  for (const s of store.getSpikes(200)) {
+    if (s.ts < since) continue;
+    const sid0 = Array.isArray(s.topSql) && s.topSql[0] ? (s.topSql[0].SQL_ID || s.topSql[0].sql_id) : null;
+    items.push({ ts: s.ts, type: 'CPU', title: `CPU 스파이크 ${Math.round(s.cpu || 0)}%`, detail: `AAS ${s.aas != null ? Number(s.aas).toFixed(1) : '-'} · 활성 ${s.activeSessions ?? '-'}`, sqlId: sid0 });
+  }
+  for (const l of store.getLocks(300)) {
+    if (l.ts < since) continue;
+    const b = l.blocker || {}, w = l.waiter || {};
+    items.push({ ts: l.ts, type: 'BLOCK', title: `블로킹 ${l.wait_sec || 0}s`, detail: `blocker ${b.sid ?? '?'} → waiter ${w.sid ?? '?'}${l.locked_obj ? ' · ' + l.locked_obj : ''}`, sqlId: b.sql_id || w.sql_id || null });
+  }
+  for (const d of store.getDeadlocks(200)) {
+    if ((d.ts || 0) < since) continue;
+    items.push({ ts: d.ts, type: 'DEADLOCK', title: '데드락 (ORA-00060)', detail: d.trace || '', sqlId: null });
+  }
+  for (const a of store.getAudit(500)) {
+    if (a.ts < since) continue;
+    if (a.action === 'KILL') items.push({ ts: a.ts, type: 'KILL', title: `세션 KILL`, detail: `${a.usr_id} · ${a.target || ''} ${a.detail || ''}`.trim(), sqlId: null });
+    else if (a.action === 'LOGIN_LOCK') items.push({ ts: a.ts, type: 'SECURITY', title: '로그인 잠금', detail: `${a.usr_id} · ${a.detail || a.target || ''}`, sqlId: null });
+  }
+  for (const al of store.getAlertLog(200)) {
+    if (al.ts < since) continue;
+    items.push({ ts: al.ts, type: 'ALERT', title: `알림: ${al.subject || al.kind || ''}`, detail: al.ok ? '메일 발송' : '메일 실패', sqlId: null });
+  }
+  items.sort((a, b) => b.ts - a.ts);
+  return { days, list: items.slice(0, 300) };
+}));
+
+// --- 라이브 상태 (탭 배지용, DB 히트 없이 수집기 최신 샘플) ---
+app.get('/api/status', api(async () => {
+  const p = collector.getHistory(1)[0] || {};
+  return { active: p.sessActive ?? null, blocked: p.sessBlocked ?? null, total: p.sessTotal ?? null, cpu: p.cpu ?? null };
+}));
+
+// --- "지금 상황 AI 요약" (Claude, 120초 캐시) ---
+app.post('/api/ai/summary', async (req, res) => {
+  const usrId = req.user && req.user.usrId;
+  try {
+    const out = await advisor.summarizeState({ force: req.query.force === '1' });
+    if (!out.cached) store.addAudit(usrId, 'AI_SUMMARY', null, out.model);
+    res.json({ ok: true, data: out });
+  } catch (e) {
+    res.status(advisor.isConfigured() ? 500 : 400).json({ ok: false, error: e.message });
+  }
+});
+
 // --- 아카이브 로그 생성률 (최근 24h) ---
 app.get('/api/archivelog', api(async () => {
   try { return { list: await db.query(Q.ARCHIVE_LOG_RATE) }; }

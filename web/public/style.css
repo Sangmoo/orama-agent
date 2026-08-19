@@ -70,12 +70,13 @@ select, input[type=text] {
   background: var(--bg3); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12px;
 }
-#refreshBtn, #themeBtn {
+#refreshBtn, #themeBtn, #reportBtn, #densityBtn {
   background: var(--bg3); color: var(--accent); border: 1px solid var(--border);
   border-radius: 6px; width: 30px; height: 28px; cursor: pointer; font-size: 15px;
 }
-#refreshBtn:hover, #themeBtn:hover { background: var(--border); }
-#themeBtn { font-size: 14px; }
+#refreshBtn:hover, #themeBtn:hover, #reportBtn:hover, #densityBtn:hover { background: var(--border); }
+#themeBtn, #reportBtn, #densityBtn { font-size: 14px; }
+#refreshBtn:disabled, #reportBtn:disabled { opacity: .5; cursor: default; }
 .lastupd { color: var(--muted); font-size: 11px; min-width: 74px; }
 
 /* ---- Tabs ---- */
@@ -284,6 +285,48 @@ tr.lop-running { background: rgba(88,166,255,.06); }
 .pager:empty { display: none; }
 .pager .mini-btn:disabled { opacity: .4; cursor: default; }
 .pager .pg-info { font-size: 12px; color: var(--muted); min-width: 150px; text-align: center; }
+
+/* 탭 라이브 배지 */
+.tab-badge { display: none; margin-left: 5px; background: var(--red); color: #fff; border-radius: 9px; padding: 0 6px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: middle; }
+.tab-badge.show { display: inline-block; }
+
+/* 지금 상황 AI 요약 카드 */
+.ai-summary-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 6px 0 16px; }
+.ai-sum-head { display: flex; align-items: center; gap: 10px; }
+.ai-sum-title { font-weight: 700; }
+.ai-sum-head .mini-btn { margin-left: auto; }
+.ai-sum-body { margin-top: 8px; font-size: 12.5px; line-height: 1.55; }
+.ai-sum-body p { margin: 4px 0; } .ai-sum-body ul { margin: 4px 0; padding-left: 20px; }
+
+/* ASH 액티비티 히트맵 */
+.heatmap-wrap { overflow-x: auto; padding: 4px 2px; }
+.hm-row { display: flex; align-items: center; height: 15px; margin-bottom: 2px; }
+.hm-rowlabel { flex: 0 0 96px; font-size: 11px; padding-right: 8px; text-align: right; white-space: nowrap; }
+.hm-cells { display: flex; gap: 1px; }
+.hm-cell { width: 11px; height: 14px; border-radius: 2px; flex: 0 0 auto; }
+.hm-axis { display: flex; margin-top: 2px; }
+.hm-axis .hm-cells { }
+.hm-tick { width: 11px; margin-right: 1px; font-size: 9px; color: var(--muted); flex: 0 0 auto; overflow: visible; white-space: nowrap; }
+
+/* 인시던트 타임라인 */
+.inc-filters { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.inc-chip { border: 1px solid var(--border); background: var(--bg3); color: var(--text); border-radius: 14px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+.inc-chip.off { opacity: .4; }
+.inc-tag { font-size: 11px; font-weight: 600; white-space: nowrap; padding: 2px 7px; border-radius: 6px; background: var(--bg3); }
+.inc-tag.inc-cpu { color: #d29922; } .inc-tag.inc-block { color: #f85149; } .inc-tag.inc-dead { color: #ff7b72; }
+.inc-tag.inc-kill { color: #db61a2; } .inc-tag.inc-sec { color: #bc8cff; } .inc-tag.inc-alert { color: #58a6ff; }
+
+/* 행 확장 상세 */
+table.expandable tbody tr:not(.row-detail) { cursor: pointer; }
+table.expandable tbody tr.expanded { background: var(--bg3); }
+.row-detail > td { background: var(--bg3); padding: 8px 12px; }
+.rd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 18px; }
+.rd-item { display: flex; gap: 8px; font-size: 12px; border-bottom: 1px dashed var(--border); padding: 2px 0; }
+.rd-k { color: var(--muted); flex: 0 0 120px; } .rd-v { color: var(--text); word-break: break-all; }
+
+/* 표 밀도(compact) */
+body.compact table th, body.compact table td { padding-top: 2px; padding-bottom: 2px; font-size: 11px; }
+body.compact .metric-grid { gap: 6px; }
 
 /* 테이블스페이스 포화 예상 */
 .ts-pred { font-weight: 600; white-space: nowrap; }

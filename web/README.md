@@ -156,6 +156,10 @@ web/
 | GET | `/api/events/locks` | 블로킹 감지 이력(blocker/waiter SQL_ID) |
 | GET | `/api/deadlocks` | 실제 데드락 이력(alert log → **SQLite 영구 저장**, 즉시 반환). `?refresh=1` 백그라운드 재수집 |
 | GET | `/api/ash` | 자체 ASH 집계 `?minutes=15` (top SQL/이벤트/세션 + 타임라인) |
+| GET | `/api/ash/heatmap` | ASH 액티비티 히트맵 `?minutes=15&buckets=48` (버킷 × 대기클래스 매트릭스) |
+| GET | `/api/incidents` | 인시던트 통합 타임라인 `?days=7` (스파이크·블로킹·데드락·KILL·보안·알림 병합) |
+| GET | `/api/status` | 라이브 상태(탭 배지용, DB 히트 없이 수집기 최신 샘플) |
+| POST | `/api/ai/summary` | 현재 스냅샷 AI 요약(Claude, 120초 캐시) |
 | GET | `/api/archivelog` | 아카이브 로그 생성률(24h) |
 | GET | `/api/segments` | 세그먼트 Top 공간소비(`dba_segments`) |
 | GET | `/api/session/:sid` | 세션 상세(v$session + v$sesstat) |
