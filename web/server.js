@@ -43,10 +43,26 @@ async function tryOne(sql, binds = {}) {
 const MODE = (process.env.ORAMON_MODE || 'readonly').toLowerCase();
 
 // ============ 인증 (아래 /api 라우트보다 먼저) ============
+const LOGIN_MAX_LABEL = parseInt(process.env.LOGIN_MAX_ATTEMPTS || '5', 10);
 app.post('/api/login', async (req, res) => {
   try {
-    const usrId = await auth.verify(req.body.usrId, req.body.password);
-    if (!usrId) return res.json({ ok: false, error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    const reqId = req.body.usrId;
+    // 1) 잠금 확인 (연속 실패 시 일시 잠금)
+    const lockSec = auth.loginLockedFor(req, reqId);
+    if (lockSec > 0) {
+      store.addAudit(String(reqId || '-'), 'LOGIN_LOCK', auth.clientIp(req), `잠금 ${lockSec}초 남음`);
+      return res.status(429).json({ ok: false, error: `로그인 시도가 많아 일시 잠겼습니다. ${lockSec}초 후 다시 시도하세요.` });
+    }
+    const usrId = await auth.verify(reqId, req.body.password);
+    if (!usrId) {
+      const f = auth.recordLoginFail(req, reqId);
+      const msg = f.locked
+        ? `로그인 실패가 많아 ${f.lockSec}초간 잠깁니다.`
+        : `아이디 또는 비밀번호가 올바르지 않습니다. (남은 시도 ${f.remaining}회)`;
+      if (f.locked) store.addAudit(String(reqId || '-'), 'LOGIN_LOCK', auth.clientIp(req), `${LOGIN_MAX_LABEL}회 연속 실패로 잠금`);
+      return res.status(f.locked ? 429 : 401).json({ ok: false, error: msg });
+    }
+    auth.recordLoginSuccess(req, usrId);
     const token = auth.createSession(usrId);
     auth.setCookie(res, token);
     store.addAudit(usrId, 'LOGIN', null, null);
@@ -225,10 +241,38 @@ app.get('/api/deadlocks', api(async (req) => {
   return { list: c.list, fetchedAt: c.fetchedAt, loading: c.loading, error: c.error };
 }));
 
-// --- 테이블스페이스 (권한 없으면 error 필드로 안내) ---
+// --- 테이블스페이스 (권한 없으면 error 필드로 안내) + 증가 예측 ---
+//   수집기가 저장한 사용량 시계열로 선형회귀 → MB/일 증가율·포화 예상일 계산 (라이선스 프리)
+const LOG_RETAIN_DAYS = parseInt(process.env.LOG_RETAIN_DAYS || '30', 10);
+function predictTs(name, usedMb, totalMb) {
+  const since = Date.now() - LOG_RETAIN_DAYS * 86400000;
+  const s = store.getTsSamples(name, since);
+  if (s.length < 3) return { status: 'collecting' }; // 표본 부족 → 수집 중
+  const spanH = (s[s.length - 1].ts - s[0].ts) / 3600000;
+  if (spanH < 2) return { status: 'collecting' };
+  // 선형회귀 y=used_mb, x=ts(ms). slope: MB/ms
+  const n = s.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const p of s) { sx += p.ts; sy += p.used_mb; sxx += p.ts * p.ts; sxy += p.ts * p.used_mb; }
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return { status: 'stable' };
+  const perDay = ((n * sxy - sx * sy) / denom) * 86400000;
+  if (perDay <= 0.5) return { status: 'stable', perDay: Math.round(perDay * 10) / 10 }; // 사실상 정체/감소
+  const remaining = (totalMb || 0) - (usedMb || 0);
+  const daysToFull = remaining > 0 ? remaining / perDay : 0;
+  return {
+    status: 'growing',
+    perDay: Math.round(perDay * 10) / 10,
+    daysToFull: Math.round(daysToFull * 10) / 10,
+    fullDate: new Date(Date.now() + daysToFull * 86400000).toISOString().slice(0, 10),
+    samples: n
+  };
+}
 app.get('/api/tablespaces', api(async () => {
   try {
-    return { list: await db.query(Q.TABLESPACES) };
+    const list = await db.query(Q.TABLESPACES);
+    for (const r of list) { try { r.PREDICT = predictTs(r.TABLESPACE_NAME, r.USED_MB, r.TOTAL_MB); } catch (_) { r.PREDICT = null; } }
+    return { list };
   } catch (e) {
     return { list: [], error: 'DBA_ 뷰 조회 권한이 없습니다 (SELECT_CATALOG_ROLE 또는 개별 GRANT 필요): ' + e.message };
   }

@@ -150,11 +150,11 @@ web/
 | GET | `/api/waits` | 대기 클래스 + 활성 대기 |
 | GET | `/api/blocking` | 블로킹 세션 |
 | GET | `/api/longops` | 진행/최근 대형작업(`v$session_longops`) |
-| GET | `/api/tablespaces` | 테이블스페이스 사용률 |
+| GET | `/api/tablespaces` | 테이블스페이스 사용률 + 포화 예상(`PREDICT`: 증가율 회귀 D-day) |
 | GET | `/api/history` | 대시보드 시계열(수집기 링버퍼) |
 | GET | `/api/events/cpu` | CPU 스파이크 이력(원인 세션·SQL 스냅샷) |
 | GET | `/api/events/locks` | 블로킹 감지 이력(blocker/waiter SQL_ID) |
-| GET | `/api/deadlocks` | 실제 데드락 이력(alert log, 백그라운드 캐시). `?refresh=1` 재수집 |
+| GET | `/api/deadlocks` | 실제 데드락 이력(alert log → **SQLite 영구 저장**, 즉시 반환). `?refresh=1` 백그라운드 재수집 |
 | GET | `/api/ash` | 자체 ASH 집계 `?minutes=15` (top SQL/이벤트/세션 + 타임라인) |
 | GET | `/api/archivelog` | 아카이브 로그 생성률(24h) |
 | GET | `/api/segments` | 세그먼트 Top 공간소비(`dba_segments`) |
@@ -168,7 +168,7 @@ web/
 | GET | `/api/audit` | 감사 로그(로그인·KILL·설정변경) |
 | GET | `/api/tune/config` | AI 튜닝 설정·모델·일일 한도/사용량 |
 | POST | `/api/tune/:id` | AI 튜닝 제안 — **SSE 스트리밍**(`thinking`/`delta`/`done`/`cached`/`error`). `?force=1` 캐시 무시 재생성 |
-| POST | `/api/login` · `/api/logout` · GET `/api/me` | 로그인/로그아웃/현재 사용자 (인증 불필요) |
+| POST | `/api/login` · `/api/logout` · GET `/api/me` | 로그인/로그아웃/현재 사용자 (인증 불필요). 로그인은 계정+IP 기준 연속 실패 시 일시 잠금(429) |
 | GET | `/metrics` | Prometheus 포맷 지표(Grafana 연동용, 인증 불필요) |
 | POST | `/api/kill` | 세션 종료 `{sid, serial}` — **dba 모드에서만**, 감사로그 기록 |
 

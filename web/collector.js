@@ -79,15 +79,18 @@ async function fetchSqlText(sqlId) {
 
 // 테이블스페이스 포화 체크 + 알림 (쿨다운)
 async function checkTablespaces() {
-  if (!mailer.isEnabled()) return;
-  if (Date.now() - lastTsAlert < TS_ALERT_COOLDOWN) return;
   try {
     const rows = await db.query(Q.TABLESPACES);
-    const over = rows.filter((r) => (r.USED_PCT || 0) >= th.tsPct);
-    if (over.length) {
-      lastTsAlert = Date.now();
-      mailer.alertTablespace(over);
-      console.log(`[collector] 📦 테이블스페이스 포화 알림: ${over.map((r) => r.TABLESPACE_NAME + ' ' + r.USED_PCT + '%').join(', ')}`);
+    // 1) 증가 예측용 시계열 샘플 저장 (메일 설정과 무관하게 항상)
+    if (store.ok() && rows.length) store.insertTsUsage(Date.now(), rows);
+    // 2) 포화 알림 (메일 활성 + 쿨다운)
+    if (mailer.isEnabled() && Date.now() - lastTsAlert >= TS_ALERT_COOLDOWN) {
+      const over = rows.filter((r) => (r.USED_PCT || 0) >= th.tsPct);
+      if (over.length) {
+        lastTsAlert = Date.now();
+        mailer.alertTablespace(over);
+        console.log(`[collector] 📦 테이블스페이스 포화 알림: ${over.map((r) => r.TABLESPACE_NAME + ' ' + r.USED_PCT + '%').join(', ')}`);
+      }
     }
   } catch (_) { /* 권한 없으면 무시 */ }
 }
@@ -207,34 +210,42 @@ async function detectBlocking() {
   for (const [k, v] of lockSeen) if (now - v > 30 * 60 * 1000) lockSeen.delete(k);
 }
 
-// ---- 데드락(alert log) 백그라운드 수집 ----
+// ---- 데드락(alert log) 백그라운드 수집 → SQLite 영구화 ----
+//   alert log 스캔이 느려(수십초) UI 를 막지 않도록 백그라운드로 수집하고,
+//   한 번 수집한 데드락은 SQLite 에 보관해 재시작·다음 조회 때 즉시 표시한다.
 async function fetchDeadlocks() {
   if (deadlockCache.loading) return;
   deadlockCache.loading = true;
   try {
     const rows = await db.query(Q.DEADLOCKS, {}, { callTimeout: 90000 }); // 느림(수십초) — 90초 넘으면 취소
-    // 30일 보관 필터(JS) → 최신순 정렬 → 상위 100
     const cut = Date.now() - LOG_RETAIN_DAYS * 86400000;
-    deadlockCache.list = rows
+    const fresh = rows
       .filter((r) => r.TS instanceof Date && r.TS.getTime() >= cut)
-      .sort((a, b) => b.TS.getTime() - a.TS.getTime())
-      .slice(0, 100)
       .map((r) => {
         const m = /More info in file (\S+)/.exec(r.MESSAGE_TEXT || '');
-        return { t: r.T, trace: m ? m[1] : null };
+        return { ts: r.TS.getTime(), t: r.T, trace: m ? m[1] : null };
       });
+    const added = store.ok() ? store.insertDeadlocks(fresh) : 0;
+    // 표시는 SQLite(영구) 우선, 없으면 방금 조회분
+    deadlockCache.list = store.ok()
+      ? store.getDeadlocks(100)
+      : fresh.sort((a, b) => b.ts - a.ts).slice(0, 100).map((d) => ({ t: d.t, trace: d.trace }));
     deadlockCache.fetchedAt = Date.now();
     deadlockCache.error = null;
-    console.log(`[collector] 데드락 이력 수집 완료: ${deadlockCache.list.length}건 (최신 ${deadlockCache.list[0] ? deadlockCache.list[0].t : '-'})`);
+    console.log(`[collector] 데드락 수집 완료: 조회 ${fresh.length}건, 신규저장 ${added}건, 보관 총 ${deadlockCache.list.length}건`);
   } catch (e) {
     deadlockCache.error = e.message;
-    console.warn('[collector] 데드락 이력 수집 실패:', e.message);
+    console.warn('[collector] 데드락 수집 실패:', e.message);
   } finally {
     deadlockCache.loading = false;
   }
 }
-function getDeadlocks() { return deadlockCache; }
-function refreshDeadlocks() { fetchDeadlocks(); return deadlockCache; }
+// 저장된 데드락을 항상 즉시 반환(느린 스캔과 무관). loading/error/fetchedAt 은 마지막 스캔 상태.
+function getDeadlocks() {
+  const list = store.ok() ? store.getDeadlocks(100) : deadlockCache.list;
+  return { list, fetchedAt: deadlockCache.fetchedAt, loading: deadlockCache.loading, error: deadlockCache.error };
+}
+function refreshDeadlocks() { fetchDeadlocks(); return getDeadlocks(); }
 
 // ---- 공개 API ----
 function start() {

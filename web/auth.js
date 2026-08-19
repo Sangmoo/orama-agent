@@ -14,6 +14,40 @@ const AUTH_ENABLED = (process.env.AUTH_ENABLED || 'true').toLowerCase() === 'tru
 
 const sessions = new Map(); // token -> { usrId, created, last }
 
+// ---- 로그인 시도 제한 (brute-force 방어) ----
+const LOGIN_MAX = parseInt(process.env.LOGIN_MAX_ATTEMPTS || '5', 10);   // 연속 실패 허용 횟수
+const LOGIN_LOCK_MS = parseInt(process.env.LOGIN_LOCK_MIN || '5', 10) * 60000; // 잠금 시간
+const LOGIN_WINDOW_MS = parseInt(process.env.LOGIN_WINDOW_MIN || '10', 10) * 60000; // 실패 카운트 유지창
+const attempts = new Map(); // key(usrId|ip) -> { fails, first, lockUntil }
+
+function clientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  return (xf ? String(xf).split(',')[0].trim() : '') || req.socket.remoteAddress || '-';
+}
+function attemptKey(req, usrId) { return `${String(usrId || '').toLowerCase()}|${clientIp(req)}`; }
+// 잠겨 있으면 남은 초, 아니면 0
+function loginLockedFor(req, usrId) {
+  const a = attempts.get(attemptKey(req, usrId));
+  if (a && a.lockUntil && a.lockUntil > Date.now()) return Math.ceil((a.lockUntil - Date.now()) / 1000);
+  return 0;
+}
+function recordLoginFail(req, usrId) {
+  const key = attemptKey(req, usrId);
+  const now = Date.now();
+  let a = attempts.get(key);
+  if (!a || now - a.first > LOGIN_WINDOW_MS) a = { fails: 0, first: now, lockUntil: 0 };
+  a.fails += 1;
+  if (a.fails >= LOGIN_MAX) a.lockUntil = now + LOGIN_LOCK_MS;
+  attempts.set(key, a);
+  return { fails: a.fails, locked: a.lockUntil > now, lockSec: Math.ceil(LOGIN_LOCK_MS / 1000), remaining: Math.max(0, LOGIN_MAX - a.fails) };
+}
+function recordLoginSuccess(req, usrId) { attempts.delete(attemptKey(req, usrId)); }
+// 오래된 항목 정리 (메모리 누수 방지)
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, a] of attempts) if ((a.lockUntil || 0) < now && now - a.first > LOGIN_WINDOW_MS) attempts.delete(k);
+}, 10 * 60000).unref();
+
 function enabled() { return AUTH_ENABLED; }
 
 // 로그인 검증. 성공 시 usrId, 실패 시 null. (오류는 상위에서 처리)
@@ -79,5 +113,6 @@ function clearCookie(res) {
 
 module.exports = {
   enabled, verify, createSession, destroySession, currentUser, requireAuth,
-  tokenFrom, setCookie, clearCookie, COOKIE
+  tokenFrom, setCookie, clearCookie, COOKIE,
+  loginLockedFor, recordLoginFail, recordLoginSuccess, clientIp
 };

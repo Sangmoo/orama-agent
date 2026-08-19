@@ -261,6 +261,13 @@ tr.lop-running { background: rgba(88,166,255,.06); }
 .pager .mini-btn:disabled { opacity: .4; cursor: default; }
 .pager .pg-info { font-size: 12px; color: var(--muted); min-width: 150px; text-align: center; }
 
+/* 테이블스페이스 포화 예상 */
+.ts-pred { font-weight: 600; white-space: nowrap; }
+.ts-pred.crit { color: var(--danger, #f85149); }
+.ts-pred.warn { color: #d29922; }
+.ts-pred.ok { color: var(--muted); font-weight: 400; }
+.ts-stable { color: var(--ok, #3fb950); }
+
 /* 스파이크 상세 */
 #spikeBody { font-size: 12.5px; line-height: 1.6; }
 #spikeBody h4 { margin: 14px 0 6px; color: var(--accent); font-size: 12px; }

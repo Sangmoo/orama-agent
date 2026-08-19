@@ -468,10 +468,23 @@ async function loadBlocking() {
 }
 
 // ---- 테이블스페이스 ----
+// 포화 예상 셀: 증가율 시계열 회귀 결과(PREDICT)를 사람이 읽는 텍스트로
+function tsPredictCell(pr) {
+  if (!pr || pr.status === 'collecting') return '<span class="mode-ro" title="사용량 표본 수집 중(최소 2시간·3표본)">수집 중…</span>';
+  if (pr.status === 'stable') return '<span class="ts-stable" title="증가율 미미">안정</span>';
+  if (pr.status === 'growing') {
+    const dcls = pr.daysToFull <= 30 ? 'crit' : pr.daysToFull <= 90 ? 'warn' : 'ok';
+    return `<span class="ts-pred ${dcls}" title="+${pr.perDay}MB/일 · 표본 ${pr.samples}개">D-${pr.daysToFull}일 · ${pr.fullDate}</span>`;
+  }
+  return '<span class="mode-ro">—</span>';
+}
 function renderTablespaces(d) {
   const list = d.list || [];
-  registerCsv('tablespaces', ['TABLESPACE', 'USED_PCT', 'TOTAL_MB', 'USED_MB', 'FREE_MB'],
-    list.map((r) => [r.TABLESPACE_NAME, r.USED_PCT, r.TOTAL_MB, r.USED_MB, r.FREE_MB]));
+  registerCsv('tablespaces', ['TABLESPACE', 'USED_PCT', 'TOTAL_MB', 'USED_MB', 'FREE_MB', 'MB_PER_DAY', 'DAYS_TO_FULL', 'FULL_DATE'],
+    list.map((r) => [r.TABLESPACE_NAME, r.USED_PCT, r.TOTAL_MB, r.USED_MB, r.FREE_MB,
+      r.PREDICT && r.PREDICT.perDay != null ? r.PREDICT.perDay : '',
+      r.PREDICT && r.PREDICT.daysToFull != null ? r.PREDICT.daysToFull : '',
+      r.PREDICT && r.PREDICT.fullDate ? r.PREDICT.fullDate : '']));
   const tb = $('#tsTable tbody');
   tb.innerHTML = list.length ? list.map((r) => {
     const p = r.USED_PCT || 0;
@@ -485,8 +498,9 @@ function renderTablespaces(d) {
       <td class="mono">${num(r.TOTAL_MB)}</td>
       <td class="mono">${num(r.USED_MB)}</td>
       <td class="mono">${num(r.FREE_MB)}</td>
+      <td>${tsPredictCell(r.PREDICT)}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="5" class="empty">데이터 없음</td></tr>';
+  }).join('') : '<tr><td colspan="6" class="empty">데이터 없음</td></tr>';
   $('#tsNotice').textContent = d.error || '';
 }
 

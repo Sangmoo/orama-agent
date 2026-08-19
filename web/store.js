@@ -47,6 +47,9 @@ function init() {
     CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT );
     CREATE TABLE IF NOT EXISTS tune_cache ( sql_id TEXT PRIMARY KEY, payload TEXT, ts INTEGER );
     CREATE TABLE IF NOT EXISTS tune_calls ( ts INTEGER, usr_id TEXT );
+    CREATE TABLE IF NOT EXISTS deadlocks ( ts INTEGER PRIMARY KEY, t TEXT, trace TEXT );
+    CREATE TABLE IF NOT EXISTS ts_usage ( ts INTEGER, tablespace TEXT, used_mb REAL, total_mb REAL );
+    CREATE INDEX IF NOT EXISTS idx_tsusage ON ts_usage(tablespace, ts);
   `);
   console.log(`[store] SQLite 준비: ${DB_FILE} (기본 보관 ${RETAIN_DAYS}일 · 이력 ${LOG_RETAIN_DAYS}일)`);
   return true;
@@ -222,6 +225,39 @@ function lastTuneCall(usrId) {
   return (r && r.m) || 0;
 }
 
+// ---- 데드락 이력 (영구화: alert log 스캔이 느려 한 번 수집하면 SQLite 에 보관) ----
+function insertDeadlocks(list) {
+  if (!db || !list || !list.length) return 0;
+  const stmt = db.prepare(`INSERT OR IGNORE INTO deadlocks (ts, t, trace) VALUES (?,?,?)`);
+  let added = 0;
+  db.exec('BEGIN');
+  try {
+    for (const d of list) { const r = stmt.run(d.ts, d.t, d.trace || null); added += r.changes || 0; }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch (_) {} }
+  return added;
+}
+function getDeadlocks(limit = 100) {
+  if (!db) return [];
+  return db.prepare(`SELECT t, trace FROM deadlocks ORDER BY ts DESC LIMIT ?`).all(limit);
+}
+
+// ---- 테이블스페이스 사용량 시계열 (증가 예측용, 라이선스 프리 자체 수집) ----
+function insertTsUsage(ts, rows) {
+  if (!db || !rows || !rows.length) return;
+  const stmt = db.prepare(`INSERT INTO ts_usage (ts, tablespace, used_mb, total_mb) VALUES (?,?,?,?)`);
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) stmt.run(ts, r.TABLESPACE_NAME, r.USED_MB, r.TOTAL_MB);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch (_) {} }
+}
+function getTsSamples(tablespace, sinceTs) {
+  if (!db) return [];
+  return db.prepare(`SELECT ts, used_mb, total_mb FROM ts_usage WHERE tablespace = ? AND ts >= ? ORDER BY ts`)
+    .all(tablespace, sinceTs);
+}
+
 // ---- 정리 ----
 function prune() {
   if (!db) return;
@@ -230,9 +266,9 @@ function prune() {
   for (const t of ['ash', 'alert_log', 'tune_calls', 'tune_cache']) {
     try { db.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(cut); } catch (_) {}
   }
-  // 감사 로그 · 블로킹 감지 이력 · CPU 스파이크 이력은 LOG_RETAIN_DAYS(기본 30일) 보관 후 삭제
+  // 감사 로그 · 블로킹 감지 이력 · CPU 스파이크 이력 · 데드락 · TS 사용량은 LOG_RETAIN_DAYS(기본 30일) 보관 후 삭제
   const logCut = Date.now() - LOG_RETAIN_DAYS * 86400000;
-  for (const t of ['audit_log', 'lock_events', 'spike_events']) {
+  for (const t of ['audit_log', 'lock_events', 'spike_events', 'deadlocks', 'ts_usage']) {
     try { db.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(logCut); } catch (_) {}
   }
   // 기준선 비교(어제 vs 오늘)를 위해 metrics 는 최소 3일 보관
@@ -245,5 +281,6 @@ module.exports = {
   insertSpike, getSpikes, insertLock, getLocks,
   listRecipients, addRecipient, removeRecipient, logAlert, getAlertLog,
   addAudit, getAudit, getSetting, setSetting,
-  getTuneCache, setTuneCache, addTuneCall, tuneCallsSince, lastTuneCall, prune
+  getTuneCache, setTuneCache, addTuneCall, tuneCallsSince, lastTuneCall,
+  insertDeadlocks, getDeadlocks, insertTsUsage, getTsSamples, prune
 };

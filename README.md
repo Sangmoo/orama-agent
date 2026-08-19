@@ -38,8 +38,8 @@ Node.js + Express + `oracledb`(Thick 모드) + 단일 페이지 대시보드. Or
 | **Top SQL** | `v$sqlarea` 누적 Elapsed Top 30 + 실행계획(`v$sql_plan`) + **AI 튜닝 제안** |
 | **대기 이벤트** | 시스템 대기 클래스 + 실시간 활성 세션 대기 + 블로킹 트리 |
 | **진행 작업** | `v$session_longops` 대형작업(RMAN/인덱스/정렬) 진행률·남은시간 |
-| **락/데드락** | 실시간 블로킹(Blocker KILL) + 블로킹 감지 이력(SQL_ID) + 실제 데드락 이력(alert log ORA-00060). 이력 표는 **10건씩 페이지네이션** |
-| **용량** | 테이블스페이스 사용률 + 아카이브 로그 생성률(24h) + 세그먼트 Top 공간소비 |
+| **락/데드락** | 실시간 블로킹(Blocker KILL) + 블로킹 감지 이력(SQL_ID) + 실제 데드락 이력(alert log ORA-00060, **SQLite 영구 저장 → 즉시 표시**). 이력 표는 **10건씩 페이지네이션** |
+| **용량** | 테이블스페이스 사용률 + **포화 예상일(증가율 회귀 D-day)** + 아카이브 로그 생성률(24h) + 세그먼트 Top 공간소비 |
 | **설정** | 이메일 알림 on/off·수신자 관리·테스트발송 + 감지 임계치 조정 + 감사 로그 |
 
 공통 기능
@@ -109,6 +109,9 @@ LOG_RETAIN_DAYS=30          # 감사 로그·블로킹 감지 이력·CPU 스파
 # 로그인 인증
 AUTH_ENABLED=true            # false 면 인증 없이 열림(사내 폐쇄망 등)
 AUTH_IDLE_MIN=480            # 무활동 세션 만료(분)
+LOGIN_MAX_ATTEMPTS=5         # 연속 실패 허용 횟수(초과 시 일시 잠금)
+LOGIN_LOCK_MIN=5             # 잠금 시간(분)
+LOGIN_WINDOW_MIN=10          # 실패 카운트 유지 창(분)
 
 # 이메일 알림 (SMTP) — 수신자 등록은 웹 UI 설정 탭에서
 ALERT_ENABLED=false
@@ -126,7 +129,8 @@ SMTP_FROM=oramon@yourcompany.com
 
 - `AUTH_ENABLED=true`(기본)면 로그인 필요. 계정은 **`T_USR`/`T_EMP` 부서 `212003`, `USE_YN='Y'`** 사용자, 아이디는 `USR_ID`.
 - 비밀번호는 **SQL 내에서 `CRYPTO_DECRYPT(U.PWD)` 로 bind 비교** → 앱이 복호화된 비밀번호를 받거나 로그에 남기지 않음.
-- 세션은 HttpOnly 쿠키, `AUTH_IDLE_MIN`(기본 8시간) 무활동 시 만료. 서버 재시작 시 재로그인.
+- 세션은 HttpOnly·SameSite=Strict 쿠키, `AUTH_IDLE_MIN`(기본 8시간) 무활동 시 만료. 서버 재시작 시 재로그인.
+- **로그인 시도 제한(brute-force 방어)**: 계정+IP 기준 `LOGIN_MAX_ATTEMPTS`(기본 5)회 연속 실패 시 `LOGIN_LOCK_MIN`(기본 5분) 일시 잠금(HTTP 429). 실패 카운트는 `LOGIN_WINDOW_MIN`(기본 10분) 창으로 관리하고, 잠금 발생은 감사 로그(`LOGIN_LOCK`)에 남습니다.
 - **감사 로그**: 로그인·KILL·설정변경을 누가 했는지 기록 → 설정 탭에서 조회.
 
 ## 1.6 이메일 알림
@@ -147,6 +151,8 @@ SMTP_FROM=oramon@yourcompany.com
 - **영구 데이터**: `web/data/oramon.db`(SQLite, 지표·ASH·이벤트·수신자·감사로그). `.gitignore` 처리됨.
 - **데이터 보관/자동 삭제**: 수집기가 매시간 오래된 데이터를 정리합니다. **감사 로그·블로킹 감지 이력·CPU 스파이크·데드락 이력은 `LOG_RETAIN_DAYS`(기본 30일)** 보관 후 삭제되고, ASH·튜닝 캐시 등은 `RETAIN_DAYS`(기본 7일)로 관리됩니다. 데드락은 alert log에서 최근 `LOG_RETAIN_DAYS`일만 표시합니다.
 - **이력 페이지네이션**: 감사 로그·블로킹 감지 이력·데드락 이력은 **10건씩 페이지**로 나눠 보며(이전/다음), CSV 내보내기는 전체 건을 대상으로 합니다.
+- **데드락 이력 영구화**: `v$diag_alert_ext`(alert log XML) 스캔이 느려서, 백그라운드로 수집한 데드락을 **SQLite `deadlocks` 테이블에 보관**합니다. UI 는 저장분을 즉시 표시하고 스캔은 백그라운드에서 신규분만 추가하므로, 느린 조회로 화면이 비어 보이지 않습니다.
+- **테이블스페이스 포화 예상**: 수집기가 사용량 시계열(`ts_usage`)을 주기적으로 저장하고, **선형회귀로 MB/일 증가율과 포화 예상일(D-day)** 을 계산해 용량 탭에 표시합니다(표본 부족 시 "수집 중", 증가 미미 시 "안정"). AWR/Diagnostic Pack 없이 자체 수집으로 동작합니다.
 
 ## 1.9 AI 튜닝 제안 (Claude API)
 
