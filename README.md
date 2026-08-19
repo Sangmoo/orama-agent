@@ -196,6 +196,8 @@ GET /metrics   →  oramon_host_cpu_pct, oramon_avg_active_sessions, oramon_sess
 ```
 Prometheus 가 scrape → Grafana 데이터소스로 연결. (`/metrics` 는 인증 불필요)
 
+**바로 쓰는 대시보드 동봉**: [`grafana/oramon-dashboard.json`](grafana/oramon-dashboard.json) 을 Grafana **Dashboards → Import** 로 올리면 CPU·AAS·세션·처리량 패널이 즉시 구성됩니다. Prometheus 스크레이프 설정과 임포트 순서는 [`grafana/README.md`](grafana/README.md) 참고.
+
 ## 1.11 라이선스 주의
 
 - **ASH 는 `v$active_session_history`(Diagnostic Pack 유료) 를 쓰지 않고** 수집기가 직접 샘플링한 자체 구현입니다.
